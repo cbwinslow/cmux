@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { getTeamId } from "../_shared/team";
+import { getTeamId, resolveTeamIdLoose } from "../_shared/team";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { authMutation } from "./users/utils";
@@ -8,6 +8,8 @@ import { mutation } from "./_generated/server";
 const GITHUB_HOST = "github.com";
 type JobDoc = Doc<"automatedCodeReviewJobs">;
 
+const MORPH_API_BASE_URL = "https://cloud.morph.so";
+
 function isActiveState(state: JobDoc["state"]): boolean {
   return state === "pending" || state === "running";
 }
@@ -15,7 +17,7 @@ function isActiveState(state: JobDoc["state"]): boolean {
 function serializeJob(job: JobDoc) {
   return {
     jobId: job._id,
-    teamId: job.teamId,
+    teamId: job.teamId ?? null,
     repoFullName: job.repoFullName,
     repoUrl: job.repoUrl,
     prNumber: job.prNumber,
@@ -78,26 +80,79 @@ async function findExistingActiveJob(
   repoFullName: string,
   prNumber: number,
 ): Promise<JobDoc | null> {
-  const candidates = await db.query("automatedCodeReviewJobs").collect();
-  let best: JobDoc | null = null;
-  for (const job of candidates) {
-    if (
-      job.teamId === teamId &&
-      job.repoFullName === repoFullName &&
-      job.prNumber === prNumber &&
-      isActiveState(job.state)
-    ) {
-      if (!best || job.updatedAt > best.updatedAt) {
-        best = job;
-      }
+  const teamFilter = teamId ?? null;
+  const query = db
+    .query("automatedCodeReviewJobs")
+    .withIndex("by_team_repo_pr_updated", (q) =>
+      q
+        .eq("teamId", teamFilter)
+        .eq("repoFullName", repoFullName)
+        .eq("prNumber", prNumber),
+    )
+    .order("desc");
+
+  let inspected = 0;
+  for await (const job of query) {
+    if (isActiveState(job.state)) {
+      return job;
+    }
+    inspected += 1;
+    if (inspected >= 10) {
+      break;
     }
   }
-  return best;
+  return null;
+}
+
+function getMorphApiKey(): string | null {
+  const key = process.env.MORPH_API_KEY;
+  if (!key || key.length === 0) {
+    return null;
+  }
+  return key;
+}
+
+async function pauseMorphInstance(sandboxInstanceId: string): Promise<void> {
+  const apiKey = getMorphApiKey();
+  if (!apiKey) {
+    console.warn(
+      "[codeReview] MORPH_API_KEY not configured; skipping Morph pause request",
+      { sandboxInstanceId }
+    );
+    return;
+  }
+
+  const url = `${MORPH_API_BASE_URL}/api/instances/${encodeURIComponent(
+    sandboxInstanceId
+  )}/pause`;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      console.warn("[codeReview] Failed to pause Morph instance", {
+        sandboxInstanceId,
+        status: response.status,
+        bodyPreview: text.slice(0, 512),
+      });
+    }
+  } catch (error) {
+    console.error("[codeReview] Error pausing Morph instance", {
+      sandboxInstanceId,
+      error,
+    });
+  }
 }
 
 export const reserveJob = authMutation({
   args: {
-    teamSlugOrId: v.string(),
+    teamSlugOrId: v.optional(v.string()),
     githubLink: v.string(),
     prNumber: v.number(),
     commitRef: v.optional(v.string()),
@@ -105,8 +160,24 @@ export const reserveJob = authMutation({
   },
   handler: async (ctx, args) => {
     const { identity } = ctx;
-    const teamId = await getTeamId(ctx, args.teamSlugOrId);
     const { repoFullName, repoUrl } = parseGithubLink(args.githubLink);
+    const repoOwner = repoFullName.split("/")[0] ?? "unknown-owner";
+    const teamKey = args.teamSlugOrId ?? repoOwner;
+
+    let teamId: string;
+    try {
+      teamId = await getTeamId(ctx, teamKey);
+    } catch (error) {
+      console.warn("[codeReview.reserveJob] Failed to resolve team, falling back", {
+        teamSlugOrId: teamKey,
+        error,
+      });
+      teamId = await resolveTeamIdLoose(ctx, teamKey);
+      console.info("[codeReview.reserveJob] Using loose team identifier", {
+        teamSlugOrId: teamKey,
+        resolvedTeamId: teamId,
+      });
+    }
 
     const existing = await findExistingActiveJob(
       ctx.db,
@@ -115,6 +186,11 @@ export const reserveJob = authMutation({
       args.prNumber,
     );
     if (existing) {
+      console.info("[codeReview.reserveJob] Reusing existing active job", {
+        jobId: existing._id,
+        repoFullName,
+        prNumber: args.prNumber,
+      });
       return {
         wasCreated: false as const,
         job: serializeJob(existing),
@@ -156,6 +232,12 @@ export const reserveJob = authMutation({
     if (!job) {
       throw new ConvexError("Failed to create job");
     }
+    console.info("[codeReview.reserveJob] Created new job", {
+      jobId,
+      teamId,
+      repoFullName,
+      prNumber: args.prNumber,
+    });
 
     return {
       wasCreated: true as const,
@@ -232,6 +314,77 @@ export const failJob = authMutation({
   },
 });
 
+export const upsertFileOutputFromCallback = mutation({
+  args: {
+    jobId: v.id("automatedCodeReviewJobs"),
+    callbackToken: v.string(),
+    filePath: v.string(),
+    codexReviewOutput: v.any(),
+    sandboxInstanceId: v.optional(v.string()),
+    commitRef: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job) {
+      throw new ConvexError("Job not found");
+    }
+
+    if (!job.callbackTokenHash) {
+      throw new ConvexError("Callback token already consumed");
+    }
+
+    const hashed = await hashSha256(args.callbackToken);
+    if (hashed !== job.callbackTokenHash) {
+      throw new ConvexError("Invalid callback token");
+    }
+
+    const now = Date.now();
+    const commitRef = args.commitRef ?? job.commitRef;
+    const sandboxInstanceId = args.sandboxInstanceId ?? job.sandboxInstanceId;
+    if (!sandboxInstanceId) {
+      throw new ConvexError("Missing sandbox instance id for file output");
+    }
+
+    const existing = await ctx.db
+      .query("automatedCodeReviewFileOutputs")
+      .withIndex("by_job_file", (q) =>
+        q.eq("jobId", job._id).eq("filePath", args.filePath),
+      )
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        codexReviewOutput: args.codexReviewOutput,
+        commitRef,
+        sandboxInstanceId,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("automatedCodeReviewFileOutputs", {
+        jobId: job._id,
+        teamId: job.teamId,
+        repoFullName: job.repoFullName,
+        prNumber: job.prNumber,
+        commitRef,
+        sandboxInstanceId,
+        filePath: args.filePath,
+        codexReviewOutput: args.codexReviewOutput,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await ctx.db.patch(job._id, {
+      updatedAt: now,
+      sandboxInstanceId,
+    });
+
+    return {
+      success: true as const,
+    };
+  },
+});
+
 export const completeJobFromCallback = mutation({
   args: {
     jobId: v.id("automatedCodeReviewJobs"),
@@ -258,11 +411,15 @@ export const completeJobFromCallback = mutation({
     }
 
     const now = Date.now();
+    const sandboxInstanceId = args.sandboxInstanceId ?? job.sandboxInstanceId;
+    if (!sandboxInstanceId) {
+      throw new ConvexError("Missing sandbox instance id for completion");
+    }
     await ctx.db.patch(job._id, {
       state: "completed",
       updatedAt: now,
       completedAt: now,
-      sandboxInstanceId: args.sandboxInstanceId ?? job.sandboxInstanceId,
+      sandboxInstanceId,
       codeReviewOutput: args.codeReviewOutput,
       callbackTokenHash: undefined,
       errorCode: undefined,
@@ -277,7 +434,7 @@ export const completeJobFromCallback = mutation({
       repoUrl: job.repoUrl,
       prNumber: job.prNumber,
       commitRef: job.commitRef,
-      sandboxInstanceId: args.sandboxInstanceId ?? job.sandboxInstanceId,
+      sandboxInstanceId,
       codeReviewOutput: args.codeReviewOutput,
       createdAt: now,
     });
@@ -286,6 +443,7 @@ export const completeJobFromCallback = mutation({
     if (!updated) {
       throw new ConvexError("Failed to update job");
     }
+    await pauseMorphInstance(sandboxInstanceId);
     return serializeJob(updated);
   },
 });
@@ -317,11 +475,15 @@ export const failJobFromCallback = mutation({
     }
 
     const now = Date.now();
+    const sandboxInstanceId = args.sandboxInstanceId ?? job.sandboxInstanceId;
+    if (!sandboxInstanceId) {
+      throw new ConvexError("Missing sandbox instance id for failure");
+    }
     await ctx.db.patch(job._id, {
       state: "failed",
       updatedAt: now,
       completedAt: now,
-      sandboxInstanceId: args.sandboxInstanceId ?? job.sandboxInstanceId,
+      sandboxInstanceId,
       errorCode: args.errorCode ?? "callback_failed",
       errorDetail: args.errorDetail,
       callbackTokenHash: undefined,
@@ -331,6 +493,7 @@ export const failJobFromCallback = mutation({
     if (!updated) {
       throw new ConvexError("Failed to update job");
     }
+    await pauseMorphInstance(sandboxInstanceId);
     return serializeJob(updated);
   },
 });

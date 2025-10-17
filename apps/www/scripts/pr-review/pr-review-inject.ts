@@ -3,6 +3,12 @@
 import { rm } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import {
+  codeReviewCallbackSchema,
+  type CodeReviewCallbackPayload,
+  codeReviewFileCallbackSchema,
+  type CodeReviewFileCallbackPayload,
+} from "@cmux/shared/codeReview/callback-schemas";
 
 interface CommandOptions {
   cwd?: string;
@@ -11,21 +17,6 @@ interface CommandOptions {
 
 const execFileAsync = promisify(execFile);
 
-type CallbackPayload =
-  | {
-      status: "success";
-      jobId: string;
-      sandboxInstanceId: string;
-      codeReviewOutput: Record<string, unknown>;
-    }
-  | {
-      status: "error";
-      jobId: string;
-      sandboxInstanceId?: string;
-      errorCode?: string;
-      errorDetail?: string;
-    };
-
 interface CallbackContext {
   url: string;
   token: string;
@@ -33,22 +24,52 @@ interface CallbackContext {
   sandboxInstanceId?: string;
 }
 
+interface FileCallbackContext {
+  url: string;
+  token: string;
+  jobId: string;
+  sandboxInstanceId?: string;
+  commitRef?: string | null;
+}
+
 async function sendCallback(
   context: CallbackContext,
-  payload: CallbackPayload
+  payload: CodeReviewCallbackPayload
 ): Promise<void> {
+  const validated = codeReviewCallbackSchema.parse(payload);
   const response = await fetch(context.url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${context.token}`,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(validated),
   });
   if (!response.ok) {
     const text = await response.text();
     throw new Error(
       `Callback failed with status ${response.status}: ${text.slice(0, 2048)}`
+    );
+  }
+}
+
+async function sendFileCallback(
+  context: FileCallbackContext,
+  payload: CodeReviewFileCallbackPayload
+): Promise<void> {
+  const validated = codeReviewFileCallbackSchema.parse(payload);
+  const response = await fetch(context.url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${context.token}`,
+    },
+    body: JSON.stringify(validated),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `File callback failed with status ${response.status}: ${text.slice(0, 2048)}`
     );
   }
 }
@@ -243,20 +264,33 @@ async function filterTextFiles(
   return files.filter((file) => textFiles.has(file));
 }
 
+interface CodexReviewResult {
+  file: string;
+  response: string;
+}
+
 interface CodexReviewContext {
   workspaceDir: string;
   baseRevision: string;
   files: readonly string[];
+  jobId: string;
+  sandboxInstanceId: string;
+  commitRef: string | null;
+  fileCallback?: FileCallbackContext | null;
 }
 
 async function runCodexReviews({
   workspaceDir,
   baseRevision,
   files,
-}: CodexReviewContext): Promise<void> {
+  jobId,
+  sandboxInstanceId,
+  commitRef,
+  fileCallback,
+}: CodexReviewContext): Promise<CodexReviewResult[]> {
   if (files.length === 0) {
     console.log("[inject] No text files require Codex review.");
-    return;
+    return [];
   }
 
   const openAiApiKey = requireEnv("OPENAI_API_KEY");
@@ -268,24 +302,20 @@ async function runCodexReviews({
   const { Codex } = await import("@openai/codex-sdk");
   const codex = new Codex({ apiKey: openAiApiKey });
 
-  const reviewResults = await Promise.allSettled(
-    files.map(async (file) => {
+  let failureCount = 0;
+  const collectedResults: CodexReviewResult[] = [];
+
+  for (const file of files) {
+    try {
       const diff = await runCommandCapture(
         "git",
         ["diff", `${baseRevision}..HEAD`, "--", file],
         { cwd: workspaceDir }
       );
-      const thread = codex.startThread({ workingDirectory: workspaceDir });
-      // const prompt = [
-      //   "You are a senior engineer performing a focused pull request review.",
-      //   `File path: ${file}`,
-      //   "",
-      //   "Review the diff below and identify bugs, risky changes, missing tests, or regressions.",
-      //   'Respond with a concise bullet list of findings. If there is nothing to flag, respond with a single bullet stating "No issues found."',
-      //   "",
-      //   "Diff:",
-      //   diff || "(no diff output)",
-      // ].join("\n");
+      const thread = codex.startThread({
+        workingDirectory: workspaceDir,
+        model: "gpt-5-codex",
+      });
       const prompt = `\
 You are a senior engineer performing a focused pull request review, focusing only on the file provided.
 File path: ${file}
@@ -315,22 +345,39 @@ ${diff || "(no diff output)"}`;
       const turn = await thread.run(prompt);
       const response = turn.finalResponse ?? "";
       logIndentedBlock(`[inject] Codex review for ${file}`, response);
-      return response;
-    })
-  );
 
-  let failureCount = 0;
-  reviewResults.forEach((result, index) => {
-    if (result.status === "rejected") {
+      const result: CodexReviewResult = { file, response };
+      collectedResults.push(result);
+
+      if (fileCallback) {
+        try {
+          await sendFileCallback(fileCallback, {
+            jobId,
+            sandboxInstanceId,
+            filePath: file,
+            commitRef: commitRef ?? undefined,
+            codexReviewOutput: result,
+          });
+          console.log(`[inject] File callback delivered for ${file}`);
+        } catch (callbackError) {
+          const callbackMessage =
+            callbackError instanceof Error
+              ? callbackError.message
+              : String(callbackError ?? "unknown callback error");
+          console.error(
+            `[inject] Failed to send file callback for ${file}: ${callbackMessage}`
+          );
+        }
+      }
+    } catch (error) {
       failureCount += 1;
-      const file = files[index] ?? "(unknown file)";
       const reason =
-        result.reason instanceof Error
-          ? result.reason.message
-          : String(result.reason);
+        error instanceof Error
+          ? error.message
+          : String(error ?? "unknown error");
       console.error(`[inject] Codex review failed for ${file}: ${reason}`);
     }
-  });
+  }
 
   if (failureCount > 0) {
     throw new Error(
@@ -339,6 +386,7 @@ ${diff || "(no diff output)"}`;
   }
 
   console.log("[inject] Codex reviews completed.");
+  return collectedResults;
 }
 
 async function main(): Promise<void> {
@@ -350,6 +398,8 @@ async function main(): Promise<void> {
   const baseRefName = requireEnv("BASE_REF_NAME");
   const callbackUrl = process.env.CALLBACK_URL ?? null;
   const callbackToken = process.env.CALLBACK_TOKEN ?? null;
+  const fileCallbackUrl = process.env.FILE_CALLBACK_URL ?? null;
+  const fileCallbackToken = process.env.FILE_CALLBACK_TOKEN ?? null;
   const jobId = requireEnv("JOB_ID");
   const sandboxInstanceId = requireEnv("SANDBOX_INSTANCE_ID");
   const logFilePath = process.env.LOG_FILE_PATH ?? null;
@@ -365,6 +415,17 @@ async function main(): Promise<void> {
           token: callbackToken,
           jobId,
           sandboxInstanceId,
+        }
+      : null;
+
+  const fileCallbackContext: FileCallbackContext | null =
+    fileCallbackUrl && fileCallbackToken
+      ? {
+          url: fileCallbackUrl,
+          token: fileCallbackToken,
+          jobId,
+          sandboxInstanceId,
+          commitRef,
         }
       : null;
 
@@ -400,12 +461,13 @@ async function main(): Promise<void> {
     })();
 
     const installCodex = (async () => {
-      console.log("[inject] Installing @openai/codex globally...");
+      console.log("[inject] Installing runtime dependencies globally...");
       await runCommand("bun", [
         "add",
         "-g",
         "@openai/codex@latest",
         "@openai/codex-sdk@latest",
+        "zod@latest",
       ]);
     })();
 
@@ -494,18 +556,21 @@ async function main(): Promise<void> {
     logFileSection("Changed text files", textChangedFiles);
     logFileSection("Modified text files", textModifiedFiles);
 
-    await runCodexReviews({
+    const codexReviews = await runCodexReviews({
       workspaceDir,
       baseRevision: mergeBaseRevision,
       files: textChangedFiles,
+      jobId,
+      sandboxInstanceId,
+      commitRef,
+      fileCallback: fileCallbackContext,
     });
 
     console.log("[inject] Done with PR review.");
 
     const reviewOutput: Record<string, unknown> = {
       prUrl,
-      repoFullName:
-        repoFullName ?? `${headRepo.owner}/${headRepo.name}`,
+      repoFullName: repoFullName ?? `${headRepo.owner}/${headRepo.name}`,
       headRefName,
       baseRefName,
       mergeBaseRevision,
@@ -515,6 +580,7 @@ async function main(): Promise<void> {
       logSymlinkPath,
       commitRef,
       teamId,
+      codexReviews,
     };
 
     if (callbackContext) {
@@ -559,6 +625,8 @@ async function main(): Promise<void> {
 }
 
 await main().catch((error) => {
-  console.error(error instanceof Error ? error.stack ?? error.message : error);
+  console.error(
+    error instanceof Error ? (error.stack ?? error.message) : error
+  );
   process.exit(1);
 });

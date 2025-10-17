@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { waitUntil } from "@vercel/functions";
 import {
   ExternalLink,
   GitBranch,
@@ -19,6 +20,11 @@ import {
 } from "@/lib/github/fetch-pull-request";
 import { isGithubApiError } from "@/lib/github/errors";
 import { cn } from "@/lib/utils";
+import { stackServerApp } from "@/lib/utils/stack";
+import {
+  getConvexHttpActionBaseUrl,
+  startCodeReviewJob,
+} from "@/lib/services/code-review/start-code-review";
 
 type PageParams = {
   teamSlugOrId: string;
@@ -45,11 +51,7 @@ export async function generateMetadata({
   }
 
   try {
-    const pullRequest = await fetchPullRequest(
-      teamSlugOrId,
-      repo,
-      pullNumber,
-    );
+    const pullRequest = await fetchPullRequest(teamSlugOrId, repo, pullNumber);
 
     return {
       title: `${pullRequest.title} · #${pullRequest.number} · ${teamSlugOrId}/${repo}`,
@@ -67,6 +69,8 @@ export async function generateMetadata({
 }
 
 export default async function PullRequestPage({ params }: PageProps) {
+  await stackServerApp.getUser({ or: "redirect" });
+
   const { teamSlugOrId, repo, pullNumber: pullNumberRaw } = await params;
   const pullNumber = parsePullNumber(pullNumberRaw);
 
@@ -74,16 +78,19 @@ export default async function PullRequestPage({ params }: PageProps) {
     notFound();
   }
 
-  const pullRequestPromise = fetchPullRequest(
-    teamSlugOrId,
-    repo,
-    pullNumber,
-  );
+  const pullRequestPromise = fetchPullRequest(teamSlugOrId, repo, pullNumber);
   const pullRequestFilesPromise = fetchPullRequestFiles(
     teamSlugOrId,
     repo,
-    pullNumber,
+    pullNumber
   );
+
+  scheduleCodeReviewStart({
+    teamSlugOrId,
+    repo,
+    pullNumber,
+    pullRequestPromise,
+  });
 
   return (
     <div className="min-h-dvh bg-neutral-50 text-neutral-900">
@@ -106,6 +113,70 @@ export default async function PullRequestPage({ params }: PageProps) {
 
 type PullRequestPromise = ReturnType<typeof fetchPullRequest>;
 
+function scheduleCodeReviewStart({
+  teamSlugOrId,
+  repo,
+  pullNumber,
+  pullRequestPromise,
+}: {
+  teamSlugOrId: string;
+  repo: string;
+  pullNumber: number;
+  pullRequestPromise: Promise<GithubPullRequest>;
+}): void {
+  waitUntil(
+    (async () => {
+      try {
+        const pullRequest = await pullRequestPromise;
+        const fallbackRepoFullName =
+          pullRequest.base?.repo?.full_name ??
+          pullRequest.head?.repo?.full_name ??
+          `${teamSlugOrId}/${repo}`;
+        const githubLink =
+          pullRequest.html_url ??
+          `https://github.com/${fallbackRepoFullName}/pull/${pullNumber}`;
+        const commitRef = pullRequest.head?.sha ?? undefined;
+
+        const callbackBaseUrl = getConvexHttpActionBaseUrl();
+        if (!callbackBaseUrl) {
+          console.error("[code-review] Convex HTTP base URL is not configured");
+          return;
+        }
+
+        const user = await stackServerApp.getUser({ or: "return-null" });
+        if (!user) {
+          return;
+        }
+
+        const { accessToken } = await user.getAuthJson();
+        if (!accessToken) {
+          return;
+        }
+
+        const { backgroundTask } = await startCodeReviewJob({
+          accessToken,
+          callbackBaseUrl,
+          payload: {
+            teamSlugOrId,
+            githubLink,
+            prNumber: pullNumber,
+            commitRef,
+          },
+        });
+
+        if (backgroundTask) {
+          await backgroundTask;
+        }
+      } catch (error) {
+        console.error(
+          "[code-review] Skipping auto-start due to PR fetch error",
+          error
+        );
+      }
+    })()
+  );
+}
+
 function PullRequestHeader({
   promise,
   owner,
@@ -118,7 +189,11 @@ function PullRequestHeader({
   try {
     const pullRequest = use(promise);
     return (
-      <PullRequestHeaderContent pullRequest={pullRequest} owner={owner} repo={repo} />
+      <PullRequestHeaderContent
+        pullRequest={pullRequest}
+        owner={owner}
+        repo={repo}
+      />
     );
   } catch (error) {
     if (isGithubApiError(error)) {
@@ -161,7 +236,7 @@ function PullRequestHeaderContent({
             <span
               className={cn(
                 "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide",
-                statusBadge.className,
+                statusBadge.className
               )}
             >
               {statusBadge.label}
@@ -217,18 +292,14 @@ function PullRequestHeaderContent({
               icon={<GitBranch className="h-4 w-4" />}
               label="Source"
               value={
-                pullRequest.head?.label ??
-                pullRequest.head?.ref ??
-                "unknown"
+                pullRequest.head?.label ?? pullRequest.head?.ref ?? "unknown"
               }
             />
             <StatCard
               icon={<GitMerge className="h-4 w-4" />}
               label="Target"
               value={
-                pullRequest.base?.label ??
-                pullRequest.base?.ref ??
-                "unknown"
+                pullRequest.base?.label ?? pullRequest.base?.ref ?? "unknown"
               }
             />
           </div>
@@ -327,7 +398,7 @@ function summarizeFiles(files: GithubPullRequestFile[]): {
       acc.deletions += file.deletions;
       return acc;
     },
-    { fileCount: 0, additions: 0, deletions: 0 },
+    { fileCount: 0, additions: 0, deletions: 0 }
   );
 }
 

@@ -3,7 +3,12 @@ import { MorphCloudClient } from "morphcloud";
 import { Octokit } from "octokit";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  codeReviewCallbackSchema,
+  type CodeReviewCallbackPayload,
+} from "@cmux/shared/codeReview/callback-schemas";
 
 const DEFAULT_MORPH_SNAPSHOT_ID = "snapshot_vb7uqz8o";
 const OPEN_VSCODE_PORT = 39378;
@@ -12,13 +17,14 @@ const REMOTE_LOG_FILE_PATH = "/root/pr-review-inject.log";
 const WORKSPACE_LOG_RELATIVE_PATH = "pr-review-inject.log";
 const WORKSPACE_LOG_ABSOLUTE_PATH = `${REMOTE_WORKSPACE_DIR}/${WORKSPACE_LOG_RELATIVE_PATH}`;
 
-const injectScriptSourceUrl = new URL(
-  "../scripts/pr-review/pr-review-inject.ts",
-  import.meta.url,
+const moduleDir = dirname(fileURLToPath(import.meta.url));
+const injectScriptSourcePath = resolve(
+  moduleDir,
+  "../scripts/pr-review/pr-review-inject.ts"
 );
-const injectScriptBundleUrl = new URL(
-  "../scripts/pr-review/pr-review-inject.bundle.js",
-  import.meta.url,
+const injectScriptBundlePath = resolve(
+  moduleDir,
+  "../scripts/pr-review/pr-review-inject.bundle.js"
 );
 
 let cachedInjectScriptPromise: Promise<string> | null = null;
@@ -29,8 +35,13 @@ function getBunExecutable(): string {
 
 async function buildInjectScript(): Promise<void> {
   const bunExecutable = getBunExecutable();
-  const sourcePath = fileURLToPath(injectScriptSourceUrl);
-  const bundlePath = fileURLToPath(injectScriptBundleUrl);
+  console.log("[pr-review][debug] buildInjectScript resolving paths", {
+    moduleDir,
+    injectScriptSourcePath,
+    injectScriptBundlePath,
+  });
+  const sourcePath = injectScriptSourcePath;
+  const bundlePath = injectScriptBundlePath;
 
   console.log("[pr-review] Bundling inject script via bun build...");
   await new Promise<void>((resolve, reject) => {
@@ -47,10 +58,12 @@ async function buildInjectScript(): Promise<void> {
         "@openai/codex-sdk",
         "--external",
         "@openai/codex",
+        "--external",
+        "zod",
       ],
       {
         stdio: "inherit",
-      },
+      }
     );
     child.once("error", reject);
     child.once("exit", (code) => {
@@ -60,8 +73,8 @@ async function buildInjectScript(): Promise<void> {
       }
       reject(
         new Error(
-          `bun build exited with code ${code ?? "unknown"} when bundling inject script`,
-        ),
+          `bun build exited with code ${code ?? "unknown"} when bundling inject script`
+        )
       );
     });
   });
@@ -70,8 +83,12 @@ async function buildInjectScript(): Promise<void> {
 async function getInjectScriptSource(): Promise<string> {
   if (!cachedInjectScriptPromise) {
     cachedInjectScriptPromise = (async () => {
+      console.log("[pr-review][debug] getInjectScriptSource triggering build");
       await buildInjectScript();
-      return readFile(injectScriptBundleUrl, "utf8");
+      console.log(
+        `[pr-review][debug] Reading inject script bundle from ${injectScriptBundlePath}`
+      );
+      return readFile(injectScriptBundlePath, "utf8");
     })().catch((error) => {
       cachedInjectScriptPromise = null;
       throw error;
@@ -87,30 +104,16 @@ interface PrReviewCallbackConfig {
 
 export interface PrReviewJobContext {
   jobId: string;
-  teamId: string;
+  teamId?: string;
   repoFullName: string;
   repoUrl: string;
   prNumber: number;
   prUrl: string;
   commitRef: string;
   callback?: PrReviewCallbackConfig;
+  fileCallback?: PrReviewCallbackConfig;
   morphSnapshotId?: string;
 }
-
-type CallbackPayload =
-  | {
-      status: "success";
-      jobId: string;
-      sandboxInstanceId: string;
-      codeReviewOutput: Record<string, unknown>;
-    }
-  | {
-      status: "error";
-      jobId: string;
-      sandboxInstanceId?: string;
-      errorCode: string;
-      errorDetail?: string;
-    };
 
 interface ParsedPrUrl {
   owner: string;
@@ -142,21 +145,22 @@ function ensureMorphClient(): MorphCloudClient {
 
 async function sendCallback(
   callback: PrReviewCallbackConfig,
-  payload: CallbackPayload,
+  payload: CodeReviewCallbackPayload
 ): Promise<void> {
   try {
+    const validatedPayload = codeReviewCallbackSchema.parse(payload);
     const response = await fetch(callback.url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${callback.token}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(validatedPayload),
     });
     if (!response.ok) {
       const text = await response.text();
       throw new Error(
-        `Callback failed with status ${response.status}: ${text.slice(0, 2048)}`,
+        `Callback failed with status ${response.status}: ${text.slice(0, 2048)}`
       );
     }
   } catch (error) {
@@ -187,7 +191,7 @@ function parsePrUrl(prUrl: string): ParsedPrUrl {
   const pathParts = url.pathname.split("/").filter(Boolean);
   if (pathParts.length < 3 || pathParts[2] !== "pull") {
     throw new Error(
-      `PR URL must be in the form https://github.com/<owner>/<repo>/pull/<number>, received: ${prUrl}`,
+      `PR URL must be in the form https://github.com/<owner>/<repo>/pull/<number>, received: ${prUrl}`
     );
   }
 
@@ -217,7 +221,7 @@ async function fetchPrMetadata(prUrl: string): Promise<PrMetadata> {
     const message =
       error instanceof Error ? error.message : String(error ?? "unknown error");
     throw new Error(
-      `Failed to fetch PR metadata via GitHub API: ${message}`.trim(),
+      `Failed to fetch PR metadata via GitHub API: ${message}`.trim()
     );
   }
 
@@ -282,6 +286,10 @@ function startTiming(label: string): () => void {
 }
 
 async function execOrThrow(instance: Instance, command: string): Promise<void> {
+  console.log("[pr-review][debug] Executing command on Morph instance", {
+    commandPreview: command.slice(0, 160),
+    instanceId: instance.id,
+  });
   const result = await instance.exec(command);
   const exitCode = result.exit_code ?? 0;
   if (exitCode !== 0) {
@@ -294,7 +302,7 @@ async function execOrThrow(instance: Instance, command: string): Promise<void> {
         stderr ? `stderr:\n${stderr}` : "",
       ]
         .filter(Boolean)
-        .join("\n\n"),
+        .join("\n\n")
     );
   }
   if (result.stdout && result.stdout.length > 0) {
@@ -319,25 +327,25 @@ function describeServices(instance: Instance): void {
 
   instance.networking.httpServices.forEach((service) => {
     console.log(
-      `HTTP service ${service.name ?? `port-${service.port}`} -> ${service.url}`,
+      `HTTP service ${service.name ?? `port-${service.port}`} -> ${service.url}`
     );
   });
 }
 
 function getOpenVscodeBaseUrl(
   instance: Instance,
-  workspacePath: string,
+  workspacePath: string
 ): URL | null {
   const services = instance.networking?.httpServices ?? [];
   const vscodeService = services.find(
     (service) =>
       service.port === OPEN_VSCODE_PORT ||
-      service.name === `port-${OPEN_VSCODE_PORT}`,
+      service.name === `port-${OPEN_VSCODE_PORT}`
   );
 
   if (!vscodeService) {
     console.warn(
-      `Warning: could not find exposed OpenVSCode service on port ${OPEN_VSCODE_PORT}.`,
+      `Warning: could not find exposed OpenVSCode service on port ${OPEN_VSCODE_PORT}.`
     );
     return null;
   }
@@ -350,7 +358,7 @@ function getOpenVscodeBaseUrl(
     const message =
       error instanceof Error ? error.message : String(error ?? "unknown error");
     console.warn(
-      `Warning: unable to format OpenVSCode URL for port ${OPEN_VSCODE_PORT}: ${message}`,
+      `Warning: unable to format OpenVSCode URL for port ${OPEN_VSCODE_PORT}: ${message}`
     );
     return null;
   }
@@ -358,7 +366,7 @@ function getOpenVscodeBaseUrl(
 
 function logOpenVscodeUrl(
   instance: Instance,
-  workspacePath: string,
+  workspacePath: string
 ): URL | null {
   const baseUrl = getOpenVscodeBaseUrl(instance, workspacePath);
   if (!baseUrl) {
@@ -371,7 +379,7 @@ function logOpenVscodeUrl(
 function logOpenVscodeFileUrl(
   instance: Instance,
   workspacePath: string,
-  relativeFilePath: string,
+  relativeFilePath: string
 ): void {
   const baseUrl = getOpenVscodeBaseUrl(instance, workspacePath);
   if (!baseUrl) {
@@ -381,13 +389,13 @@ function logOpenVscodeFileUrl(
   const fileUrl = new URL(baseUrl.toString());
   fileUrl.searchParams.set("path", relativeFilePath);
   console.log(
-    `OpenVSCode log file (${relativeFilePath}): ${fileUrl.toString()}`,
+    `OpenVSCode log file (${relativeFilePath}): ${fileUrl.toString()}`
   );
 }
 
 function buildMetadata(
   pr: PrMetadata,
-  config: PrReviewJobContext,
+  config: PrReviewJobContext
 ): Record<string, string> {
   return {
     purpose: "pr-review",
@@ -395,7 +403,7 @@ function buildMetadata(
     repo: `${pr.owner}/${pr.repo}`,
     head: `${pr.headRepoOwner}/${pr.headRepoName}#${pr.headRefName}`,
     jobId: config.jobId,
-    teamId: config.teamId,
+    ...(config.teamId ? { teamId: config.teamId } : {}),
     commitRef: config.commitRef,
   };
 }
@@ -412,9 +420,17 @@ async function fetchPrMetadataTask(prUrl: string): Promise<PrMetadata> {
 
 async function startMorphInstanceTask(
   client: MorphCloudClient,
-  config: PrReviewJobContext,
+  config: PrReviewJobContext
 ): Promise<Instance> {
   const snapshotId = config.morphSnapshotId ?? DEFAULT_MORPH_SNAPSHOT_ID;
+  console.log(
+    "[pr-review][debug] startMorphInstanceTask called",
+    {
+      snapshotId,
+      jobId: config.jobId,
+      repoFullName: config.repoFullName,
+    }
+  );
   console.log(`Starting Morph instance from snapshot ${snapshotId}...`);
   const finishStartInstance = startTiming("start Morph instance");
   try {
@@ -426,31 +442,49 @@ async function startMorphInstanceTask(
         purpose: "pr-review",
         prUrl: config.prUrl,
         jobId: config.jobId,
-        teamId: config.teamId,
+        ...(config.teamId ? { teamId: config.teamId } : {}),
         repo: config.repoFullName,
       },
     });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : String(error ?? "unknown error");
+    console.error(`[pr-review] Failed to start Morph instance: ${message}`);
+    throw error;
   } finally {
     finishStartInstance();
   }
 }
 
 export async function startAutomatedPrReview(
-  config: PrReviewJobContext,
+  config: PrReviewJobContext
 ): Promise<void> {
   console.log(
-    `[pr-review] Preparing Morph review environment for ${config.prUrl}`,
+    `[pr-review] Preparing Morph review environment for ${config.prUrl}`
   );
+  console.log("[pr-review][debug] startAutomatedPrReview config snapshot", {
+    jobId: config.jobId,
+    repoFullName: config.repoFullName,
+    prUrl: config.prUrl,
+    commitRef: config.commitRef,
+    hasCallback: Boolean(config.callback),
+    hasFileCallback: Boolean(config.fileCallback),
+    morphSnapshotId: config.morphSnapshotId,
+  });
   const morphClient = ensureMorphClient();
   let instance: Instance | null = null;
 
   try {
-    const startInstancePromise = startMorphInstanceTask(morphClient, config).then(
-      (startedInstance) => {
-        instance = startedInstance;
-        return startedInstance;
-      },
-    );
+    console.log("[pr-review][debug] Starting parallel tasks", {
+      jobId: config.jobId,
+    });
+    const startInstancePromise = startMorphInstanceTask(
+      morphClient,
+      config
+    ).then((startedInstance) => {
+      instance = startedInstance;
+      return startedInstance;
+    });
     const prMetadataPromise = fetchPrMetadataTask(config.prUrl);
 
     const [prMetadata, startedInstance] = await Promise.all([
@@ -460,7 +494,7 @@ export async function startAutomatedPrReview(
     instance = startedInstance;
 
     console.log(
-      `[pr-review] Targeting ${prMetadata.headRepoOwner}/${prMetadata.headRepoName}@${prMetadata.headRefName}`,
+      `[pr-review] Targeting ${prMetadata.headRepoOwner}/${prMetadata.headRepoName}@${prMetadata.headRefName}`
     );
 
     try {
@@ -471,7 +505,7 @@ export async function startAutomatedPrReview(
           ? metadataError.message
           : String(metadataError ?? "unknown error");
       console.warn(
-        `[pr-review] Warning: failed to set metadata for instance ${startedInstance.id}: ${message}`,
+        `[pr-review] Warning: failed to set metadata for instance ${startedInstance.id}: ${message}`
       );
     }
 
@@ -490,7 +524,7 @@ export async function startAutomatedPrReview(
     const openAiApiKey = process.env.OPENAI_API_KEY;
     if (!openAiApiKey || openAiApiKey.length === 0) {
       throw new Error(
-        "OPENAI_API_KEY environment variable is required to run PR review.",
+        "OPENAI_API_KEY environment variable is required to run PR review."
       );
     }
 
@@ -510,7 +544,6 @@ export async function startAutomatedPrReview(
       ["LOG_FILE_PATH", REMOTE_LOG_FILE_PATH],
       ["LOG_SYMLINK_PATH", WORKSPACE_LOG_ABSOLUTE_PATH],
       ["JOB_ID", config.jobId],
-      ["TEAM_ID", config.teamId],
       ["SANDBOX_INSTANCE_ID", startedInstance.id],
       ["REPO_FULL_NAME", config.repoFullName],
       ["COMMIT_REF", config.commitRef],
@@ -519,6 +552,13 @@ export async function startAutomatedPrReview(
     if (config.callback) {
       envPairs.push(["CALLBACK_URL", config.callback.url]);
       envPairs.push(["CALLBACK_TOKEN", config.callback.token]);
+    }
+    if (config.fileCallback) {
+      envPairs.push(["FILE_CALLBACK_URL", config.fileCallback.url]);
+      envPairs.push(["FILE_CALLBACK_TOKEN", config.fileCallback.token]);
+    }
+    if (config.teamId) {
+      envPairs.push(["TEAM_ID", config.teamId]);
     }
 
     const envAssignments = envPairs
@@ -532,7 +572,7 @@ export async function startAutomatedPrReview(
         `chmod +x ${shellQuote(remoteScriptPath)}`,
         `rm -f ${shellQuote(REMOTE_LOG_FILE_PATH)}`,
         `nohup env ${envAssignments} bun ${shellQuote(
-          remoteScriptPath,
+          remoteScriptPath
         )} > ${shellQuote(REMOTE_LOG_FILE_PATH)} 2>&1 &`,
       ].join("\n") + "\n";
 
@@ -544,30 +584,36 @@ export async function startAutomatedPrReview(
     }
 
     console.log(
-      `[pr-review] Repository preparation is running in the background. Remote log: ${REMOTE_LOG_FILE_PATH}`,
+      `[pr-review] Repository preparation is running in the background. Remote log: ${REMOTE_LOG_FILE_PATH}`
     );
     console.log(
-      `[pr-review] Symlinked workspace log (once created): ${WORKSPACE_LOG_ABSOLUTE_PATH}`,
+      `[pr-review] Symlinked workspace log (once created): ${WORKSPACE_LOG_ABSOLUTE_PATH}`
     );
     logOpenVscodeFileUrl(
       startedInstance,
       REMOTE_WORKSPACE_DIR,
-      WORKSPACE_LOG_RELATIVE_PATH,
+      WORKSPACE_LOG_RELATIVE_PATH
     );
     console.log(
-      `[pr-review] Morph instance ${startedInstance.id} provisioned for PR ${prMetadata.prUrl}`,
+      `[pr-review] Morph instance ${startedInstance.id} provisioned for PR ${prMetadata.prUrl}`
     );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
     console.error(`[pr-review] Failure during setup: ${message}`);
 
-    if (config.callback) {
+    console.log("[pr-review][debug] Failure context", {
+      jobId: config.jobId,
+      instanceId: instance?.id ?? null,
+      errorMessage: message,
+    });
+
+    if (config.callback && instance) {
       try {
         await sendCallback(config.callback, {
           status: "error",
           jobId: config.jobId,
-          sandboxInstanceId: instance?.id ?? undefined,
+          sandboxInstanceId: instance.id,
           errorCode: "pr_review_setup_failed",
           errorDetail: message,
         });
@@ -576,8 +622,15 @@ export async function startAutomatedPrReview(
           callbackError instanceof Error
             ? callbackError.message
             : String(callbackError ?? "Unknown callback error");
-        console.error(`[pr-review] Callback dispatch failed: ${callbackMessage}`);
+        console.error(
+          `[pr-review] Callback dispatch failed: ${callbackMessage}`
+        );
       }
+    } else if (config.callback && !instance) {
+      console.warn(
+        "[pr-review][debug] Skipping failure callback because Morph instance was never provisioned",
+        { jobId: config.jobId }
+      );
     }
 
     if (instance) {
@@ -589,7 +642,7 @@ export async function startAutomatedPrReview(
             ? pauseError.message
             : String(pauseError ?? "Unknown pause error");
         console.warn(
-          `[pr-review] Warning: failed to pause instance ${instance.id}: ${pauseMessage}`,
+          `[pr-review] Warning: failed to pause instance ${instance.id}: ${pauseMessage}`
         );
       }
     }

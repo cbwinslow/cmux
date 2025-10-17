@@ -64,6 +64,12 @@ async function sendCallback(
   config: RunnerConfig,
   payload: CallbackPayload,
 ): Promise<void> {
+  console.info("[code-review-runner] Sending callback", {
+    jobId: config.jobId,
+    callbackUrl: config.callbackUrl,
+    status: payload.status,
+    callbackTokenPreview: config.callbackToken.slice(0, 8),
+  });
   const response = await fetch(config.callbackUrl, {
     method: "POST",
     headers: {
@@ -74,6 +80,12 @@ async function sendCallback(
   });
   if (!response.ok) {
     const text = await response.text();
+    console.error("[code-review-runner] Callback returned non-200", {
+      jobId: config.jobId,
+      status: response.status,
+      bodyPreview: text.slice(0, 512),
+      callbackTokenPreview: config.callbackToken.slice(0, 8),
+    });
     throw new Error(
       `Callback failed with status ${response.status}: ${text.slice(0, 2048)}`,
     );
@@ -90,6 +102,13 @@ function ensureMorphClient(): MorphCloudClient {
 
 async function main() {
   const config = parseArgs();
+  console.info("[code-review-runner] Starting runner", {
+    jobId: config.jobId,
+    repoFullName: config.repoFullName,
+    prNumber: config.prNumber,
+    callbackUrl: config.callbackUrl,
+    callbackTokenPreview: config.callbackToken.slice(0, 8),
+  });
   const morphClient = ensureMorphClient();
 
   let instance:
@@ -146,12 +165,20 @@ async function main() {
         lsOutput: (lsResult.stdout ?? "").trim(),
       },
     });
+    console.info("[code-review-runner] Callback sent successfully", {
+      jobId: config.jobId,
+      sandboxInstanceId,
+    });
 
     await instance.pause().catch((error) => {
       console.warn(
         `[code-review-runner] Failed to pause Morph instance ${sandboxInstanceId}`,
         error,
       );
+    }).then(() => {
+      console.info("[code-review-runner] Morph instance paused", {
+        sandboxInstanceId,
+      });
     });
   } catch (error) {
     const message =
@@ -171,6 +198,11 @@ async function main() {
         errorCode: "runner_failed",
         errorDetail: message,
       });
+      console.info("[code-review-runner] Error callback sent", {
+        jobId: config.jobId,
+        sandboxInstanceId,
+        errorCode: "runner_failed",
+      });
     } catch (callbackError) {
       console.error(
         "[code-review-runner] Failed to post callback",
@@ -184,6 +216,10 @@ async function main() {
           `[code-review-runner] Failed to pause Morph instance ${instance?.id}`,
           pauseError,
         );
+      }).then(() => {
+        console.info("[code-review-runner] Morph instance paused after failure", {
+          sandboxInstanceId: instance?.id ?? "unknown",
+        });
       });
     }
   }

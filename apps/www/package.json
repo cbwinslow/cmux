@@ -33,6 +33,7 @@
     "@stackframe/js": "^2.8.41",
     "@stackframe/stack": "^2.8.41",
     "@t3-oss/env-core": "^0.13.8",
+    "@vercel/functions": "^1.4.0",
     "ai": "^5.0.22",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

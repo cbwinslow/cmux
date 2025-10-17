@@ -527,7 +527,7 @@ export type GenerateBranchesBody = {
 export type CodeReviewStartResponse = {
     job: {
         jobId: string;
-        teamId: string;
+        teamId: string | null;
         repoFullName: string;
         repoUrl: string;
         prNumber: number;
@@ -553,21 +553,6 @@ export type CodeReviewStartBody = {
     githubLink: string;
     prNumber: number;
     commitRef?: string;
-};
-
-export type CodeReviewCallbackBody = {
-    status: 'success';
-    jobId: string;
-    sandboxInstanceId: string;
-    codeReviewOutput: {
-        [key: string]: unknown;
-    };
-} | {
-    status: 'error';
-    jobId: string;
-    sandboxInstanceId?: string;
-    errorCode?: string;
-    errorDetail?: string;
 };
 
 export type GetApiHealthData = {
@@ -2120,31 +2105,6 @@ export type PostApiCodeReviewStartResponses = {
 };
 
 export type PostApiCodeReviewStartResponse = PostApiCodeReviewStartResponses[keyof PostApiCodeReviewStartResponses];
-
-export type PostApiCodeReviewCallbackData = {
-    body: CodeReviewCallbackBody;
-    path?: never;
-    query?: never;
-    url: '/api/code-review/callback';
-};
-
-export type PostApiCodeReviewCallbackErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Failed to process callback
-     */
-    500: unknown;
-};
-
-export type PostApiCodeReviewCallbackResponses = {
-    /**
-     * Callback processed
-     */
-    200: unknown;
-};
 
 export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
