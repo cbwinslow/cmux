@@ -10,7 +10,6 @@ import {
 import {
   ChevronDown,
   ChevronRight,
-  FileText,
   Folder,
 } from "lucide-react";
 import {
@@ -441,7 +440,7 @@ function FileTreeNavigator({
                 type="button"
                 onClick={() => onToggleDirectory(node.path)}
                 className={cn(
-                  "flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition hover:bg-neutral-100",
+                  "flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-left text-sm font-medium transition hover:bg-neutral-100",
                   isExpanded ? "text-neutral-900" : "text-neutral-700",
                 )}
                 style={{ paddingLeft: depth * 14 + 10 }}
@@ -476,12 +475,11 @@ function FileTreeNavigator({
             type="button"
             onClick={() => onSelectFile(node.path)}
             className={cn(
-              "flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-xs transition hover:bg-neutral-100",
+              "flex w-full items-center gap-1 rounded-md px-2.5 py-1 text-left text-sm transition hover:bg-neutral-100",
               isActive ? "bg-sky-100/80 text-sky-900 shadow-sm" : "text-neutral-700",
             )}
-            style={{ paddingLeft: depth * 14 + 26 }}
+            style={{ paddingLeft: depth * 14 + 32 }}
           >
-            <FileText className="h-4 w-4 text-neutral-500" />
             <span className="truncate font-medium">{node.name}</span>
           </button>
         );
@@ -557,14 +555,14 @@ function FileDiffCard({
           hunks={diff.hunks}
           viewType="split"
           optimizeSelection
-          className="diff-syntax jetbrains-mono-force overflow-auto bg-white text-xs leading-5 text-neutral-800"
-          gutterClassName="jetbrains-mono-force bg-white text-xs text-neutral-500"
-          codeClassName="jetbrains-mono-force text-xs text-neutral-800"
+          className="diff-syntax system-mono overflow-auto bg-white text-xs leading-5 text-neutral-800"
+          gutterClassName="system-mono bg-white text-xs text-neutral-500"
+          codeClassName="system-mono text-xs text-neutral-800"
           tokens={tokens ?? undefined}
           generateLineClassName={({ changes, defaultGenerate }) => {
             const defaultClassName = defaultGenerate();
             const classNames: string[] = [
-              "jetbrains-mono-force text-xs py-1",
+              "system-mono text-xs py-1",
             ];
             const normalizedChanges = changes.filter(
               (change): change is ChangeData => Boolean(change),
