@@ -9,7 +9,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import z from "zod";
 import {
   TaskRunTerminalSession,
@@ -18,10 +18,11 @@ import {
 import { toMorphXtermBaseUrl } from "@/lib/toProxyWorkspaceUrl";
 import {
   createTerminalTabQueryOptions,
+  deleteTerminalTabQueryOptions,
   terminalTabsQueryKey,
   terminalTabsQueryOptions,
+  type TerminalTabId,
 } from "@/queries/terminals";
-import type { TerminalTabId } from "@/queries/terminals";
 
 const paramsSchema = z.object({
   taskId: typedZid("tasks"),
@@ -101,6 +102,13 @@ function TaskRunTerminals() {
   const [createTerminalError, setCreateTerminalError] = useState<string | null>(
     null
   );
+  const [deleteTerminalRequest, setDeleteTerminalRequest] = useState<{
+    id: TerminalTabId;
+    key: number;
+  } | null>(null);
+  const [deleteTerminalError, setDeleteTerminalError] = useState<string | null>(
+    null
+  );
 
   const createTerminalQuery = useQuery(
     createTerminalTabQueryOptions({
@@ -111,7 +119,19 @@ function TaskRunTerminals() {
     })
   );
 
+  const deleteTerminalQuery = useQuery(
+    deleteTerminalTabQueryOptions({
+      baseUrl: xtermBaseUrl,
+      contextKey: taskRunId,
+      tabId: deleteTerminalRequest?.id ?? "",
+      triggerKey: deleteTerminalRequest?.key ?? null,
+      enabled: hasTerminalBackend && deleteTerminalRequest !== null,
+    })
+  );
+
   const isCreatingTerminal = createTerminalQuery.fetchStatus === "fetching";
+  const deletingTerminalId = deleteTerminalRequest?.id ?? null;
+  const isDeletingTerminal = deleteTerminalQuery.fetchStatus === "fetching";
 
   useEffect(() => {
     if (!createTerminalRequestKey) {
@@ -168,6 +188,61 @@ function TaskRunTerminals() {
     createTerminalQuery.error,
     createTerminalQuery.status,
     createTerminalRequestKey,
+  ]);
+
+  useEffect(() => {
+    if (!deleteTerminalRequest) {
+      return;
+    }
+    if (deleteTerminalQuery.status !== "success") {
+      return;
+    }
+    const removedId = deleteTerminalRequest.id;
+    setDeleteTerminalError(null);
+    setConnectionStates((prev) => {
+      const { [removedId]: _removed, ...rest } = prev;
+      return rest;
+    });
+    const nextTabIds = queryClient.setQueryData<TerminalTabId[] | undefined>(
+      terminalTabsQueryKey(xtermBaseUrl, taskRunId),
+      (current) => {
+        if (!current) {
+          return [];
+        }
+        return current.filter((id) => id !== removedId);
+      }
+    ) ?? [];
+    setDeleteTerminalRequest(null);
+    setActiveTerminalId((current) => {
+      if (current && current !== removedId && nextTabIds.includes(current)) {
+        return current;
+      }
+      return nextTabIds.length > 0 ? nextTabIds[0] : null;
+    });
+  }, [
+    deleteTerminalQuery.status,
+    deleteTerminalRequest,
+    queryClient,
+    taskRunId,
+    xtermBaseUrl,
+  ]);
+
+  useEffect(() => {
+    if (!deleteTerminalRequest) {
+      return;
+    }
+    if (deleteTerminalQuery.status !== "error") {
+      return;
+    }
+    const error = deleteTerminalQuery.error;
+    setDeleteTerminalRequest(null);
+    setDeleteTerminalError(
+      error instanceof Error ? error.message : "Unable to close terminal."
+    );
+  }, [
+    deleteTerminalQuery.error,
+    deleteTerminalQuery.status,
+    deleteTerminalRequest,
   ]);
 
   useEffect(() => {
@@ -246,27 +321,65 @@ function TaskRunTerminals() {
             {terminalIds.length > 0 ? (
               terminalIds.map((id, index) => {
                 const state = connectionStates[id] ?? "connecting";
+                const isActive = activeTerminalId === id;
+                const isDeletingThis =
+                  isDeletingTerminal && deletingTerminalId === id;
                 return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setActiveTerminalId(id)}
-                    className={clsx(
-                      "flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors", 
-                      activeTerminalId === id
-                        ? "bg-neutral-900 text-neutral-50 dark:bg-neutral-100 dark:text-neutral-900"
-                        : "bg-transparent text-neutral-600 hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800/60 dark:hover:text-neutral-100"
-                    )}
-                    title={id}
-                  >
-                    <span
+                  <div key={id} className="relative pr-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTerminalId(id)}
                       className={clsx(
-                        "h-2 w-2 rounded-full",
-                        CONNECTION_STATE_COLORS[state]
+                        "flex items-center gap-2 rounded-md pl-3 pr-8 py-1.5 text-xs font-medium transition-colors",
+                        isActive
+                          ? "bg-neutral-900 text-neutral-50 dark:bg-neutral-100 dark:text-neutral-900"
+                          : "bg-transparent text-neutral-600 hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800/60 dark:hover:text-neutral-100"
                       )}
-                    />
-                    <span className="whitespace-nowrap">Terminal {index + 1}</span>
-                  </button>
+                      title={id}
+                    >
+                      <span
+                        className={clsx(
+                          "h-2 w-2 rounded-full",
+                          CONNECTION_STATE_COLORS[state]
+                        )}
+                      />
+                      <span className="whitespace-nowrap">
+                        Terminal {index + 1}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        event.preventDefault();
+                        if (isDeletingThis) {
+                          return;
+                        }
+                        setDeleteTerminalError(null);
+                        setDeleteTerminalRequest({
+                          id,
+                          key: Date.now(),
+                        });
+                      }}
+                      disabled={isDeletingThis}
+                      className={clsx(
+                        "absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                        isActive
+                          ? "text-neutral-100 hover:text-neutral-50 hover:bg-neutral-900/80 dark:text-neutral-700 dark:hover:text-neutral-900 dark:hover:bg-neutral-200"
+                          : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-300 dark:text-neutral-400 dark:hover:text-neutral-100 dark:hover:bg-neutral-700"
+                      )}
+                      aria-label={`Close terminal ${index + 1}`}
+                      title="Close terminal"
+                    >
+                      {isDeletingThis ? (
+                        <span className="text-[10px] font-medium leading-none">
+                          …
+                        </span>
+                      ) : (
+                        <X className="h-3 w-3" />
+                      )}
+                    </button>
+                  </div>
                 );
               })
             ) : (
@@ -302,6 +415,11 @@ function TaskRunTerminals() {
             {createTerminalError ? (
               <span className="text-xs text-red-500 dark:text-red-400">
                 {createTerminalError}
+              </span>
+            ) : null}
+            {deleteTerminalError ? (
+              <span className="text-xs text-red-500 dark:text-red-400">
+                {deleteTerminalError}
               </span>
             ) : null}
           </div>
