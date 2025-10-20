@@ -36,6 +36,15 @@ function parseMorphUrl(input: string): MorphUrlComponents | null {
   }
 }
 
+function createMorphPortUrl(
+  components: MorphUrlComponents,
+  port: number
+): URL {
+  const url = new URL(components.url.toString());
+  url.hostname = `port-${port}-morphvm-${components.morphId}.http.cloud.morph.so`;
+  return url;
+}
+
 export function toProxyWorkspaceUrl(workspaceUrl: string): string {
   const components = parseMorphUrl(workspaceUrl);
 
@@ -56,8 +65,7 @@ export function toMorphVncUrl(sourceUrl: string): string | null {
     return null;
   }
 
-  const vncUrl = new URL(components.url.toString());
-  vncUrl.hostname = `port-39380-morphvm-${components.morphId}.http.cloud.morph.so`;
+  const vncUrl = createMorphPortUrl(components, 39380);
   vncUrl.pathname = "/vnc.html";
 
   const searchParams = new URLSearchParams();
@@ -67,4 +75,19 @@ export function toMorphVncUrl(sourceUrl: string): string | null {
   vncUrl.hash = "";
 
   return vncUrl.toString();
+}
+
+export function toMorphXtermBaseUrl(sourceUrl: string): string | null {
+  const components = parseMorphUrl(sourceUrl);
+
+  if (!components) {
+    return null;
+  }
+
+  const baseUrl = createMorphPortUrl(components, 39383);
+  baseUrl.pathname = "/";
+  baseUrl.search = "";
+  baseUrl.hash = "";
+
+  return baseUrl.toString();
 }
