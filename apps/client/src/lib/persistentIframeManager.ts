@@ -80,6 +80,7 @@ class PersistentIframeManager {
   private resizeObserver: ResizeObserver;
   private activeIframeKey: string | null = null;
   private debugMode = false;
+  private syncTimeouts = new Map<string, number>();
 
   constructor() {
     // Create resize observer for syncing positions
@@ -165,6 +166,8 @@ class PersistentIframeManager {
       transform: translate(-100vw, -100vh);
       width: 100vw;
       height: 100vh;
+      will-change: transform;
+      backface-visibility: hidden;
     `;
     wrapper.setAttribute("data-iframe-key", key);
 
@@ -174,6 +177,8 @@ class PersistentIframeManager {
       width: 100%;
       height: 100%;
       border: 0;
+      background: white;
+      display: block;
     `;
 
     // Apply permissions if provided
@@ -261,6 +266,8 @@ class PersistentIframeManager {
       entry.wrapper.style.visibility = "visible";
       entry.wrapper.style.pointerEvents = "auto";
       entry.wrapper.style.overflow = "hidden";
+      entry.wrapper.style.willChange = "transform";
+      entry.wrapper.style.backfaceVisibility = "hidden";
 
       if (options?.style) {
         for (const [styleKey, styleValue] of Object.entries(options.style)) {
@@ -359,10 +366,21 @@ class PersistentIframeManager {
       return;
     }
 
-    // Update wrapper position using transform, keeping resize handles unobstructed
-    entry.wrapper.style.transform = `translate(${rect.left + borderLeft}px, ${rect.top + borderTop}px)`;
-    entry.wrapper.style.width = `${width}px`;
-    entry.wrapper.style.height = `${height}px`;
+    // Use requestAnimationFrame to batch position updates and prevent flashing
+    const existingTimeout = this.syncTimeouts.get(key);
+    if (existingTimeout !== undefined) {
+      cancelAnimationFrame(existingTimeout);
+    }
+
+    const rafId = requestAnimationFrame(() => {
+      this.syncTimeouts.delete(key);
+      // Update wrapper position using transform, keeping resize handles unobstructed
+      entry.wrapper.style.transform = `translate(${rect.left + borderLeft}px, ${rect.top + borderTop}px)`;
+      entry.wrapper.style.width = `${width}px`;
+      entry.wrapper.style.height = `${height}px`;
+    });
+
+    this.syncTimeouts.set(key, rafId);
   }
 
   /**
@@ -399,6 +417,13 @@ class PersistentIframeManager {
   unmountIframe(key: string): void {
     const entry = this.iframes.get(key);
     if (!entry) return;
+
+    // Cancel any pending sync
+    const syncTimeout = this.syncTimeouts.get(key);
+    if (syncTimeout !== undefined) {
+      cancelAnimationFrame(syncTimeout);
+      this.syncTimeouts.delete(key);
+    }
 
     entry.wrapper.style.visibility = "hidden";
     entry.wrapper.style.pointerEvents = "none";
@@ -449,6 +474,13 @@ class PersistentIframeManager {
   removeIframe(key: string): void {
     const entry = this.iframes.get(key);
     if (!entry) return;
+
+    // Cancel any pending sync
+    const syncTimeout = this.syncTimeouts.get(key);
+    if (syncTimeout !== undefined) {
+      cancelAnimationFrame(syncTimeout);
+      this.syncTimeouts.delete(key);
+    }
 
     if (entry.wrapper.parentElement) {
       entry.wrapper.parentElement.removeChild(entry.wrapper);
@@ -506,6 +538,12 @@ class PersistentIframeManager {
    * Clear all iframes
    */
   clear(): void {
+    // Cancel all pending syncs
+    for (const rafId of this.syncTimeouts.values()) {
+      cancelAnimationFrame(rafId);
+    }
+    this.syncTimeouts.clear();
+
     for (const key of this.iframes.keys()) {
       this.removeIframe(key);
     }

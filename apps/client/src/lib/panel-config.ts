@@ -17,7 +17,7 @@ export const DEFAULT_PANEL_CONFIG: PanelConfig = {
 export const PANEL_LABELS: Record<PanelType, string> = {
   chat: "Chat",
   workspace: "Workspace",
-  terminal: "tmux Terminal",
+  terminal: "Terminal",
   browser: "Browser Preview",
   gitDiff: "Git Diff",
 };
