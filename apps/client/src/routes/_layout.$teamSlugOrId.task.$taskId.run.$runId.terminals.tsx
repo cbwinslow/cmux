@@ -203,15 +203,16 @@ function TaskRunTerminals() {
       const { [removedId]: _removed, ...rest } = prev;
       return rest;
     });
-    const nextTabIds = queryClient.setQueryData<TerminalTabId[] | undefined>(
-      terminalTabsQueryKey(xtermBaseUrl, taskRunId),
-      (current) => {
-        if (!current) {
-          return [];
+    const nextTabIds =
+      queryClient.setQueryData<TerminalTabId[] | undefined>(
+        terminalTabsQueryKey(xtermBaseUrl, taskRunId),
+        (current) => {
+          if (!current) {
+            return [];
+          }
+          return current.filter((id) => id !== removedId);
         }
-        return current.filter((id) => id !== removedId);
-      }
-    ) ?? [];
+      ) ?? [];
     setDeleteTerminalRequest(null);
     setActiveTerminalId((current) => {
       if (current && current !== removedId && nextTabIds.includes(current)) {
@@ -307,17 +308,21 @@ function TaskRunTerminals() {
 
   const renderTerminalArea = () => {
     if (!isMorphProvider) {
-      return renderMessage("Terminals are only available for Morph-based runs.");
+      return renderMessage(
+        "Terminals are only available for Morph-based runs."
+      );
     }
 
     if (!xtermBaseUrl) {
-      return renderMessage("Waiting for Morph workspace to expose the terminal backend...");
+      return renderMessage(
+        "Waiting for Morph workspace to expose the terminal backend..."
+      );
     }
 
     return (
       <div className="flex flex-col grow min-h-0">
         <div className="flex items-center justify-between gap-3 border-b border-neutral-200 bg-neutral-100/70 px-3 dark:border-neutral-800 dark:bg-neutral-900/40">
-          <div className="flex min-h-[40px] items-center overflow-x-auto py-2">
+          <div className="flex items-center overflow-x-auto py-0.5">
             {terminalIds.length > 0 ? (
               terminalIds.map((id, index) => {
                 const state = connectionStates[id] ?? "connecting";
