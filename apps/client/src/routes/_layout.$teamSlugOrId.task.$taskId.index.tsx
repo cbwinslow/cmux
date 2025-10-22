@@ -450,40 +450,40 @@ function TaskDetailPage() {
       TASK_RUN_IFRAME_SANDBOX,
       onClose: handlePanelClose,
     }), [
-      task,
-      taskRuns,
-      crownEvaluation,
-      workspaceUrl,
-      workspacePersistKey,
-      selectedRun,
-      editorStatus,
-      handleWorkspaceStatusChange,
-      onEditorLoad,
-      onEditorError,
-      editorLoadingFallback,
-      editorErrorFallback,
-      workspacePlaceholderMessage,
-      isEditorBusy,
-      rawWorkspaceUrl,
-      browserUrl,
-      browserPersistKey,
-      browserStatus,
-      handleBrowserStatusChange,
-      browserOverlayMessage,
-      isMorphProvider,
-      isBrowserBusy,
-      handlePanelClose,
-    ],
+    task,
+    taskRuns,
+    crownEvaluation,
+    workspaceUrl,
+    workspacePersistKey,
+    selectedRun,
+    editorStatus,
+    handleWorkspaceStatusChange,
+    onEditorLoad,
+    onEditorError,
+    editorLoadingFallback,
+    editorErrorFallback,
+    workspacePlaceholderMessage,
+    isEditorBusy,
+    rawWorkspaceUrl,
+    browserUrl,
+    browserPersistKey,
+    browserStatus,
+    handleBrowserStatusChange,
+    browserOverlayMessage,
+    isMorphProvider,
+    isBrowserBusy,
+    handlePanelClose,
+  ],
   );
 
   return (
     <FloatingPane>
       <div className="flex h-full min-h-0 flex-col bg-neutral-50 dark:bg-black">
         <TaskDetailHeader
-          task={task ?? null}
-          taskRuns={taskRuns ?? null}
-          selectedRun={selectedRun ?? null}
-          taskRunId={headerTaskRunId ?? ("" as Id<"taskRuns">)}
+          task={task}
+          taskRuns={taskRuns}
+          selectedRun={selectedRun}
+          taskRunId={headerTaskRunId}
           teamSlugOrId={teamSlugOrId}
         />
         <div className="flex flex-1 min-h-0 px-1 py-1">

@@ -36,7 +36,7 @@ export function loadPanelConfig(): PanelConfig {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      const parsed = JSON.parse(stored) as Partial<PanelConfig>;
+      const parsed = JSON.parse(stored);
       return {
         topLeft: parsed.topLeft ?? DEFAULT_PANEL_CONFIG.topLeft,
         topRight: parsed.topRight ?? DEFAULT_PANEL_CONFIG.topRight,
