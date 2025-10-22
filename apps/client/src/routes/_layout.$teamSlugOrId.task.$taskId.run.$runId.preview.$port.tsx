@@ -4,8 +4,13 @@ import { api } from "@cmux/convex/api";
 import { typedZid } from "@cmux/shared/utils/typed-zid";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
-import { useMemo } from "react";
+import { useMemo, useState, useCallback } from "react";
 import z from "zod";
+import { TaskRunTerminalSession, type TerminalConnectionState } from "@/components/task-run-terminal-session";
+import { toMorphXtermBaseUrl } from "@/lib/toProxyWorkspaceUrl";
+import { createTerminalTab, terminalTabsQueryKey, terminalTabsQueryOptions, type TerminalTabId } from "@/queries/terminals";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { convexQuery } from "@convex-dev/react-query";
 
 const paramsSchema = z.object({
   taskId: typedZid("tasks"),
@@ -26,6 +31,62 @@ export const Route = createFileRoute(
         port: params.port,
       };
     },
+  },
+  loader: async (opts) => {
+    const { params, context } = opts;
+    const { teamSlugOrId, runId } = params;
+    const { queryClient } = context;
+
+    const taskRun = await queryClient.ensureQueryData(
+      convexQuery(api.taskRuns.get, {
+        teamSlugOrId,
+        id: runId,
+      })
+    );
+
+    const vscodeInfo = taskRun?.vscode;
+    const rawMorphUrl = vscodeInfo?.url ?? vscodeInfo?.workspaceUrl ?? null;
+    const isMorphProvider = vscodeInfo?.provider === "morph";
+
+    if (!isMorphProvider || !rawMorphUrl) {
+      return;
+    }
+
+    const baseUrl = toMorphXtermBaseUrl(rawMorphUrl);
+    const tabsQueryKey = terminalTabsQueryKey(baseUrl, runId);
+
+    const tabs = await queryClient.ensureQueryData(
+      terminalTabsQueryOptions({
+        baseUrl,
+        contextKey: runId,
+      })
+    );
+
+    if (tabs.length > 0) {
+      return;
+    }
+
+    try {
+      const created = await createTerminalTab({
+        baseUrl,
+        request: {
+          cmd: "tmux",
+          args: ["attach", "-t", "cmux:dev"],
+        },
+      });
+
+      queryClient.setQueryData<TerminalTabId[]>(tabsQueryKey, (current) => {
+        if (!current || current.length === 0) {
+          return [created.id];
+        }
+        if (current.includes(created.id)) {
+          return current;
+        }
+        return [...current, created.id];
+      });
+    } catch (error) {
+      console.error("Failed to auto-create dev script terminal", error);
+    }
   },
 });
 
@@ -56,45 +117,98 @@ function PreviewPage() {
     return getTaskRunPreviewPersistKey(runId, port);
   }, [runId, port]);
 
+  // Terminal setup
+  const vscodeInfo = selectedRun?.vscode;
+  const rawMorphUrl = vscodeInfo?.url ?? vscodeInfo?.workspaceUrl ?? null;
+  const isMorphProvider = vscodeInfo?.provider === "morph";
+  const baseUrl = useMemo(() => {
+    if (!isMorphProvider || !rawMorphUrl) return null;
+    return toMorphXtermBaseUrl(rawMorphUrl);
+  }, [isMorphProvider, rawMorphUrl]);
+
+  const terminalTabsQuery = useSuspenseQuery(
+    terminalTabsQueryOptions({
+      baseUrl,
+      contextKey: runId,
+      enabled: Boolean(baseUrl),
+    })
+  );
+
+  const activeTerminalId = terminalTabsQuery.data?.[0] ?? null;
+
+  // Terminal state
+  const [isTerminalVisible, setIsTerminalVisible] = useState(() => {
+    // Default: closed, but will open if there's an error
+    return false;
+  });
+
+  const handleConnectionStateChange = useCallback((state: TerminalConnectionState) => {
+    // Auto-expand terminal on error
+    if (state === "error") {
+      setIsTerminalVisible(true);
+    }
+  }, []);
+
+  const toggleTerminal = useCallback(() => {
+    setIsTerminalVisible((prev) => !prev);
+  }, []);
+
   const paneBorderRadius = 6;
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-neutral-950">
-      <div className="flex-1 min-h-0">
-        {previewUrl ? (
-          <ElectronPreviewBrowser
-            persistKey={persistKey}
-            src={previewUrl}
-            borderRadius={paneBorderRadius}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <p className="mb-2 text-sm text-neutral-500 dark:text-neutral-400">
-                {selectedRun
-                  ? `Port ${port} is not available for this run`
-                  : "Loading..."}
-              </p>
-              {selectedRun?.networking && selectedRun.networking.length > 0 && (
-                <div className="mt-4">
-                  <p className="mb-2 text-xs text-neutral-400 dark:text-neutral-500">
-                    Available ports:
-                  </p>
-                  <div className="flex justify-center gap-2">
-                    {selectedRun.networking
-                      .filter((s) => s.status === "running")
-                      .map((service) => (
-                        <span
-                          key={service.port}
-                          className="rounded px-2 py-1 text-xs bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-200"
-                        >
-                          {service.port}
-                        </span>
-                      ))}
+      <div className="flex-1 min-h-0 flex">
+        {/* Preview Panel */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          {previewUrl ? (
+            <ElectronPreviewBrowser
+              persistKey={persistKey}
+              src={previewUrl}
+              borderRadius={paneBorderRadius}
+              terminalVisible={isTerminalVisible}
+              onToggleTerminal={toggleTerminal}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center">
+                <p className="mb-2 text-sm text-neutral-500 dark:text-neutral-400">
+                  {selectedRun
+                    ? `Port ${port} is not available for this run`
+                    : "Loading..."}
+                </p>
+                {selectedRun?.networking && selectedRun.networking.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs text-neutral-400 dark:text-neutral-500">
+                      Available ports:
+                    </p>
+                    <div className="flex justify-center gap-2">
+                      {selectedRun.networking
+                        .filter((s) => s.status === "running")
+                        .map((service) => (
+                          <span
+                            key={service.port}
+                            className="rounded px-2 py-1 text-xs bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-200"
+                          >
+                            {service.port}
+                          </span>
+                        ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
+          )}
+        </div>
+
+        {/* Terminal Panel */}
+        {isTerminalVisible && baseUrl && activeTerminalId && (
+          <div className="w-[400px] border-l border-neutral-200 dark:border-neutral-800 flex flex-col min-h-0">
+            <TaskRunTerminalSession
+              baseUrl={baseUrl}
+              terminalId={activeTerminalId}
+              isActive={true}
+              onConnectionStateChange={handleConnectionStateChange}
+            />
           </div>
         )}
       </div>

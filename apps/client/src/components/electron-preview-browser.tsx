@@ -4,6 +4,7 @@ import {
   Inspect,
   Loader2,
   RefreshCw,
+  Terminal,
 } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -27,6 +28,8 @@ interface ElectronPreviewBrowserProps {
   persistKey: string;
   src: string;
   borderRadius?: number;
+  terminalVisible?: boolean;
+  onToggleTerminal?: () => void;
 }
 
 interface NativeViewHandle {
@@ -93,6 +96,8 @@ function useLoadingProgress(isLoading: boolean) {
 export function ElectronPreviewBrowser({
   persistKey,
   src,
+  terminalVisible = false,
+  onToggleTerminal,
 }: ElectronPreviewBrowserProps) {
   const [viewHandle, setViewHandle] = useState<NativeViewHandle | null>(null);
   const [addressValue, setAddressValue] = useState(src);
@@ -731,6 +736,28 @@ export function ElectronPreviewBrowser({
               disabled={!viewHandle}
             />
             <div className="flex items-center gap-1">
+              {onToggleTerminal && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className={clsx(
+                        "size-7 rounded-full p-0 text-neutral-600 hover:text-neutral-800 disabled:opacity-30 disabled:hover:text-neutral-400 dark:text-neutral-500 dark:hover:text-neutral-100 dark:disabled:hover:text-neutral-500",
+                        terminalVisible && "text-primary hover:text-primary",
+                      )}
+                      onClick={onToggleTerminal}
+                      aria-label={terminalVisible ? "Hide Terminal" : "Show Terminal"}
+                    >
+                      <Terminal className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" align="end">
+                    {terminalVisible ? "Hide Terminal" : "Show Terminal"}
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
