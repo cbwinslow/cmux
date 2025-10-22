@@ -133,7 +133,7 @@ export function TaskRunTerminalPane({ workspaceUrl }: TaskRunTerminalPaneProps) 
             baseUrl,
             request: {
               cmd: "tmux",
-              args: ["new-session", "-A", "-s", "cmux"],
+              args: ["attach", "-t", "cmux"],
             },
           });
 

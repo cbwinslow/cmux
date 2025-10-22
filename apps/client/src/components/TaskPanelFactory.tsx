@@ -311,7 +311,6 @@ const RenderPanelComponent = (props: PanelFactoryProps): ReactNode => {
             </div>
           ) : workspacePlaceholder ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-neutral-500 dark:text-neutral-400">
-              <Code2 className="size-4" aria-hidden />
               <div className="text-sm font-medium text-neutral-600 dark:text-neutral-200">
                 {workspacePlaceholder.title}
               </div>
@@ -391,7 +390,6 @@ const RenderPanelComponent = (props: PanelFactoryProps): ReactNode => {
             </div>
           ) : browserPlaceholder ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-neutral-500 dark:text-neutral-400">
-              <Globe2 className="size-4" aria-hidden />
               <div className="text-sm font-medium text-neutral-600 dark:text-neutral-200">
                 {browserPlaceholder.title}
               </div>
