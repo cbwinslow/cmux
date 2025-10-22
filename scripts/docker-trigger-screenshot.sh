@@ -115,13 +115,18 @@ if [ "$health_ready" = false ]; then
 fi
 
 if [ -n "$PR_URL" ]; then
-  echo "Cloning PR $PR_URL into /root/workspace..."
+  echo "Preparing PR $PR_URL in /root/workspace..."
   GH_TOKEN_VALUE=$(gh auth token 2>/dev/null || true)
   if [ -z "$GH_TOKEN_VALUE" ]; then
     echo "Error: GitHub auth token unavailable. Run 'gh auth login' on the host before using --pr." >&2
     cleanup
     exit 1
   fi
+
+  tmp_pr_description="$(mktemp)"
+  clone_status=0
+  description_status=0
+
   docker exec \
     -e PR_URL="$PR_URL" \
     -e GH_TOKEN="$GH_TOKEN_VALUE" \
@@ -155,7 +160,40 @@ echo "Fetching PR branch via gh pr checkout..."
 export GIT_TERMINAL_PROMPT=0
 gh pr checkout "$PR_URL" >/dev/null
 echo "Repository ready at $WORKTREE"
-' 
+' &
+  clone_pid=$!
+
+  gh pr view "$PR_URL" --json body --jq '.body // ""' >"$tmp_pr_description" &
+  description_pid=$!
+
+  set +e
+  wait "$clone_pid"
+  clone_status=$?
+  wait "$description_pid"
+  description_status=$?
+  set -e
+
+  if [ "$clone_status" -ne 0 ]; then
+    echo "Error: Failed to clone PR into worker container" >&2
+    rm -f "$tmp_pr_description"
+    cleanup
+    exit 1
+  fi
+
+  pr_description=""
+  if [ "$description_status" -ne 0 ]; then
+    echo "Warning: Unable to retrieve PR description; continuing without it" >&2
+  else
+    pr_description=$(cat "$tmp_pr_description")
+  fi
+  rm -f "$tmp_pr_description"
+
+  if [ -n "$pr_description" ]; then
+    docker exec "$CONTAINER_NAME" bash -lc 'mkdir -p /root/workspace/.cmux'
+    printf "%s" "$pr_description" | docker exec -i "$CONTAINER_NAME" bash -lc 'cat > /root/workspace/.cmux/pr-description.md'
+    docker exec "$CONTAINER_NAME" bash -lc 'chmod 600 /root/workspace/.cmux/pr-description.md'
+    echo "PR description copied into container for screenshot context."
+  fi
 fi
 
 echo "Performing Socket.IO polling handshake..."
