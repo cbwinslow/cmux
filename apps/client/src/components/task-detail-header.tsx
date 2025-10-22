@@ -65,6 +65,10 @@ interface TaskDetailHeaderProps {
   totalAdditions?: number;
   totalDeletions?: number;
   taskRunId: Id<"taskRuns">;
+  onExpandAll?: () => void;
+  onCollapseAll?: () => void;
+  onExpandAllChecks?: () => void;
+  onCollapseAllChecks?: () => void;
   onPanelSettings?: () => void;
   teamSlugOrId: string;
 }
@@ -196,6 +200,10 @@ export function TaskDetailHeader({
   taskRuns,
   selectedRun,
   taskRunId,
+  onExpandAll,
+  onCollapseAll,
+  onExpandAllChecks,
+  onCollapseAllChecks,
   onPanelSettings,
   teamSlugOrId,
 }: TaskDetailHeaderProps) {
@@ -262,6 +270,20 @@ export function TaskDetailHeader({
   const dragStyle = isElectron
     ? ({ WebkitAppRegion: "drag" } as CSSProperties)
     : undefined;
+
+  const hasExpandActions = Boolean(onExpandAll || onExpandAllChecks);
+  const hasCollapseActions = Boolean(onCollapseAll || onCollapseAllChecks);
+  const showActionsDropdown = hasExpandActions || hasCollapseActions;
+
+  const handleExpandAllClick = useCallback(() => {
+    onExpandAll?.();
+    onExpandAllChecks?.();
+  }, [onExpandAll, onExpandAllChecks]);
+
+  const handleCollapseAllClick = useCallback(() => {
+    onCollapseAll?.();
+    onCollapseAllChecks?.();
+  }, [onCollapseAll, onCollapseAllChecks]);
 
   return (
     <div
@@ -340,6 +362,34 @@ export function TaskDetailHeader({
             >
               <Settings className="w-3.5 h-3.5" />
             </button>
+          )}
+
+          {showActionsDropdown && (
+            <Dropdown.Root>
+              <Dropdown.Trigger
+                className="p-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-white select-none"
+                aria-label="More actions"
+              >
+                <span aria-hidden>⋯</span>
+              </Dropdown.Trigger>
+              <Dropdown.Portal>
+                <Dropdown.Positioner sideOffset={5}>
+                  <Dropdown.Popup>
+                    <Dropdown.Arrow />
+                    {hasExpandActions && (
+                      <Dropdown.Item onClick={handleExpandAllClick}>
+                        Expand all
+                      </Dropdown.Item>
+                    )}
+                    {hasCollapseActions && (
+                      <Dropdown.Item onClick={handleCollapseAllClick}>
+                        Collapse all
+                      </Dropdown.Item>
+                    )}
+                  </Dropdown.Popup>
+                </Dropdown.Positioner>
+              </Dropdown.Portal>
+            </Dropdown.Root>
           )}
 
           <button className="p-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-white select-none hidden">
