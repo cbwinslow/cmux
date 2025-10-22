@@ -11,12 +11,13 @@ import type { PersistentWebViewProps } from "./persistent-webview";
 import type { WorkspaceLoadingIndicatorProps } from "./workspace-loading-indicator";
 import type { TaskRunTerminalPaneProps } from "./TaskRunTerminalPane";
 import type { TaskRunGitDiffPanelProps } from "./TaskRunGitDiffPanel";
+import {
+  PANEL_DRAG_END_EVENT,
+  PANEL_DRAG_START_EVENT,
+  type PanelDragLifecycleEvent,
+} from "./panel-drag-events";
 
 type PanelPosition = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
-
-const PANEL_DRAG_START_EVENT = "cmux:panel-drag-start";
-const PANEL_DRAG_END_EVENT = "cmux:panel-drag-end";
-type PanelDragLifecycleEvent = typeof PANEL_DRAG_START_EVENT | typeof PANEL_DRAG_END_EVENT;
 
 const dispatchPanelDragEvent = (event: PanelDragLifecycleEvent) => {
   if (typeof window === "undefined") {
