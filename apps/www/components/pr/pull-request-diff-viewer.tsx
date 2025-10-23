@@ -41,7 +41,7 @@ import "react-diff-view/style/index.css";
 import { api } from "@cmux/convex/api";
 import { useConvexQuery } from "@convex-dev/react-query";
 import type { FunctionReturnType } from "convex/server";
-import type { GithubPullRequestFile } from "@/lib/github/fetch-pull-request";
+import type { GithubFileChange } from "@/lib/github/fetch-pull-request";
 import { cn } from "@/lib/utils";
 import {
   Tooltip,
@@ -59,15 +59,15 @@ import {
 } from "./heatmap";
 
 type PullRequestDiffViewerProps = {
-  files: GithubPullRequestFile[];
+  files: GithubFileChange[];
   teamSlugOrId: string;
   repoFullName: string;
-  prNumber: number;
+  prNumber: number | null;
   commitRef?: string;
 };
 
 type ParsedFileDiff = {
-  file: GithubPullRequestFile;
+  file: GithubFileChange;
   anchorId: string;
   diff: FileData | null;
   error?: string;
@@ -281,7 +281,7 @@ type FileTreeNode = {
   name: string;
   path: string;
   children: FileTreeNode[];
-  file?: GithubPullRequestFile;
+  file?: GithubFileChange;
 };
 
 type FileStatusMeta = {
@@ -291,7 +291,7 @@ type FileStatusMeta = {
 };
 
 function getFileStatusMeta(
-  status: GithubPullRequestFile["status"] | undefined
+  status: GithubFileChange["status"] | undefined
 ): FileStatusMeta {
   const iconClassName = "h-3.5 w-3.5";
 
@@ -344,12 +344,15 @@ export function PullRequestDiffViewer({
   commitRef,
 }: PullRequestDiffViewerProps) {
   const fileOutputArgs = useMemo(
-    () => ({
-      teamSlugOrId,
-      repoFullName,
-      prNumber,
-      ...(commitRef ? { commitRef } : {}),
-    }),
+    () =>
+      prNumber === null
+        ? ("skip" as const)
+        : {
+            teamSlugOrId,
+            repoFullName,
+            prNumber,
+            ...(commitRef ? { commitRef } : {}),
+          },
     [teamSlugOrId, repoFullName, prNumber, commitRef]
   );
 
@@ -1855,7 +1858,7 @@ function buildChangeKeyIndex(diff: FileData | null): Map<number, string> {
   return map;
 }
 
-function buildDiffText(file: GithubPullRequestFile): string {
+function buildDiffText(file: GithubFileChange): string {
   const oldPath =
     file.status === "added"
       ? "/dev/null"
@@ -1876,7 +1879,7 @@ function buildDiffText(file: GithubPullRequestFile): string {
   ].join("\n");
 }
 
-function buildFileTree(files: GithubPullRequestFile[]): FileTreeNode[] {
+function buildFileTree(files: GithubFileChange[]): FileTreeNode[] {
   const root: FileTreeNode = {
     name: "",
     path: "",
