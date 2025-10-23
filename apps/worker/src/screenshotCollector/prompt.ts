@@ -25,6 +25,8 @@ export function buildScreenshotPrompt({
       "Return a JSON object matching { hasUiChanges: boolean; uiChangesToScreenshotInstructions: string }.",
       "Set hasUiChanges to true when the listed files imply UI changes that should be captured.",
       "If hasUiChanges is true, describe exactly which UI flows or screens to capture in uiChangesToScreenshotInstructions.",
+      "Include the http urls that an agent should first navigate to in order to capture the screenshots.",
+      "Ensure that you've explored the codebase sufficiently to understand which port and path the agent should navigate to in order to capture the screenshots.",
       'If false, respond with "None".',
     ].join("\n"),
   ];
