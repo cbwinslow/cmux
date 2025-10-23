@@ -1,3 +1,4 @@
+import { startBrowserAgent } from "magnitude-core";
 import { log } from "../logger";
 import { runCommandCapture } from "../crown/utils";
 import { filterTextFiles, parseFileList, resolveMergeBase } from "./git";
@@ -12,6 +13,7 @@ import { runScreenshotAnalysis } from "./analysis";
 
 export interface StartScreenshotCollectionOptions {
   openAiApiKey?: string | null;
+  anthropicApiKey?: string | null;
 }
 
 export async function startScreenshotCollection(
@@ -111,14 +113,16 @@ export async function startScreenshotCollection(
       });
     }
 
-    const suppliedKey = options.openAiApiKey?.trim();
+    const suppliedOpenAiKey = options.openAiApiKey?.trim();
     const openAiApiKey =
-      suppliedKey && suppliedKey.length > 0
-        ? suppliedKey
+      suppliedOpenAiKey && suppliedOpenAiKey.length > 0
+        ? suppliedOpenAiKey
         : process.env.OPENAI_API_KEY;
 
     await logToScreenshotCollector(
-      `OPENAI_API_KEY source: ${suppliedKey ? "payload" : "environment"}`
+      `OPENAI_API_KEY source: ${
+        suppliedOpenAiKey ? "payload" : "environment"
+      }`
     );
     await logToScreenshotCollector(
       `OPENAI_API_KEY (first 8 chars): ${
@@ -133,6 +137,35 @@ export async function startScreenshotCollection(
       log(
         "ERROR",
         "OPENAI_API_KEY is not set; cannot analyze diffs for screenshots",
+        { baseBranch, mergeBase }
+      );
+      return;
+    }
+
+    const suppliedAnthropicKey = options.anthropicApiKey?.trim();
+    const anthropicApiKey =
+      suppliedAnthropicKey && suppliedAnthropicKey.length > 0
+        ? suppliedAnthropicKey
+        : process.env.ANTHROPIC_API_KEY;
+
+    await logToScreenshotCollector(
+      `ANTHROPIC_API_KEY source: ${
+        suppliedAnthropicKey ? "payload" : "environment"
+      }`
+    );
+    await logToScreenshotCollector(
+      `ANTHROPIC_API_KEY (first 8 chars): ${
+        anthropicApiKey ? anthropicApiKey.slice(0, 8) : "<none>"
+      }`
+    );
+
+    if (!anthropicApiKey) {
+      await logToScreenshotCollector(
+        "ANTHROPIC_API_KEY missing; cannot start Magnitude computer agent"
+      );
+      log(
+        "ERROR",
+        "ANTHROPIC_API_KEY is not set; cannot launch computer use agent",
         { baseBranch, mergeBase }
       );
       return;
@@ -162,6 +195,69 @@ export async function startScreenshotCollection(
       baseBranch,
       mergeBase,
     });
+
+    if (!analysis.hasUiChanges) {
+      await logToScreenshotCollector(
+        "Codex detected no UI changes; skipping computer agent workflow"
+      );
+      return;
+    }
+
+    const screenshotInstructions =
+      analysis.uiChangesToScreenshotInstructions.trim();
+
+    if (screenshotInstructions.length === 0) {
+      await logToScreenshotCollector(
+        "Codex response did not include UI change instructions; skipping computer agent workflow"
+      );
+      return;
+    }
+
+    await logToScreenshotCollector(
+      `Launching Magnitude computer agent with claude-sonnet-4-5 via CDP at 127.0.0.1:9222`
+    );
+    await logToScreenshotCollector(
+      `Computer agent instructions:\n${screenshotInstructions}`
+    );
+
+    const agent = await startBrowserAgent({
+      llm: {
+        provider: "anthropic",
+        options: {
+          model: "claude-sonnet-4-5",
+          apiKey: anthropicApiKey,
+        },
+      },
+      browser: {
+        cdp: "http://127.0.0.1:9222",
+      },
+    });
+
+    try {
+      await agent.act(screenshotInstructions);
+      await logToScreenshotCollector(
+        "Magnitude computer agent completed the UI change instructions"
+      );
+      log(
+        "INFO",
+        "Magnitude computer agent completed the UI change instructions",
+        { baseBranch, mergeBase }
+      );
+    } catch (agentError) {
+      const message =
+        agentError instanceof Error
+          ? agentError.message
+          : String(agentError ?? "unknown agent error");
+      await logToScreenshotCollector(
+        `Magnitude computer agent failed: ${message}`
+      );
+      log(
+        "ERROR",
+        "Magnitude computer agent failed to run UI change instructions",
+        { error: message, baseBranch, mergeBase }
+      );
+      throw agentError;
+    }
   } catch (error) {
     const reason =
       error instanceof Error ? error.message : String(error ?? "unknown error");

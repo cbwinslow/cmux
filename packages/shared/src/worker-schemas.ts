@@ -184,6 +184,7 @@ export const WorkerExecResultSchema = z.object({
 
 export const WorkerStartScreenshotCollectionSchema = z.object({
   openAiApiKey: z.string().min(1).optional(),
+  anthropicApiKey: z.string().min(1).optional(),
 });
 
 // Server to Worker Events

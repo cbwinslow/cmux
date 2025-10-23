@@ -310,17 +310,47 @@ COPY apps/worker/tsconfig.json ./apps/worker/
 COPY apps/worker/wait-for-docker.sh ./apps/worker/
 
 # Build worker with bundling, using the installed node_modules
-RUN cd /cmux && \
-  bun build ./apps/worker/src/index.ts \
+RUN bash <<'EOF'
+set -euo pipefail
+cd /cmux
+bun build ./apps/worker/src/index.ts \
   --target node \
   --outdir ./apps/worker/build \
   --external @cmux/convex \
   --external convex \
-  --external node:* && \
-  echo "Built worker" && \
-  cp -r ./apps/worker/build /builtins/build && \
-  cp ./apps/worker/wait-for-docker.sh /usr/local/bin/ && \
-  chmod +x /usr/local/bin/wait-for-docker.sh
+  --external node:*
+echo "Built worker"
+mkdir -p ./apps/worker/build/node_modules
+shopt -s nullglob
+copied_sharp=false
+for dir in node_modules/.bun/sharp@*/node_modules/sharp; do
+  if [ -d "$dir" ]; then
+    rm -rf ./apps/worker/build/node_modules/sharp
+    cp -RL "$dir" ./apps/worker/build/node_modules/
+    copied_sharp=true
+    break
+  fi
+done
+if [ "$copied_sharp" = false ]; then
+  echo "Warning: sharp binary directory not found during build" >&2
+fi
+mkdir -p ./apps/worker/build/node_modules/@img
+for dir in node_modules/.bun/@img+sharp-*/node_modules/@img/*; do
+  base=$(basename "$dir")
+  rm -rf "./apps/worker/build/node_modules/@img/$base"
+  cp -RL "$dir" "./apps/worker/build/node_modules/@img/$base"
+done
+for dir in node_modules/.bun/patchright-core@*/node_modules/patchright-core; do
+  if [ -d "$dir" ]; then
+    rm -rf ./apps/worker/build/node_modules/patchright-core
+    cp -RL "$dir" ./apps/worker/build/node_modules/
+    break
+  fi
+done
+cp -r ./apps/worker/build /builtins/build
+cp ./apps/worker/wait-for-docker.sh /usr/local/bin/
+chmod +x /usr/local/bin/wait-for-docker.sh
+EOF
 
 # Stage 2: Runtime base (shared between local and morph)
 FROM ubuntu:24.04 AS runtime-base

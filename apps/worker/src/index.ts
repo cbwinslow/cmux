@@ -495,6 +495,7 @@ managementIO.on("connection", (socket) => {
       try {
         await startScreenshotCollection({
           openAiApiKey: config?.openAiApiKey,
+          anthropicApiKey: config?.anthropicApiKey,
         });
       } catch (error) {
         log(

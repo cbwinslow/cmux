@@ -76,6 +76,11 @@ if [ -z "${OPENAI_API_KEY:-}" ]; then
   exit 1
 fi
 
+if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+  echo "Error: ANTHROPIC_API_KEY not set. Add it to your environment or .env before running." >&2
+  exit 1
+fi
+
 echo "Building Docker image..."
 docker build -t "$IMAGE_NAME" .
 
@@ -100,8 +105,9 @@ docker run -d \
   -p 39380:39380 \
   -p 39381:39381 \
   -p 39382:39382 \
--p 39383:39383 \
--e OPENAI_API_KEY="$OPENAI_API_KEY" \
+  -p 39383:39383 \
+  -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
   --name "$CONTAINER_NAME" \
   "$IMAGE_NAME"
 container_started=true
@@ -233,7 +239,22 @@ curl -s \
   "${POLLING_BASE}&sid=${SID}&t=$(date +%s%3N)" >/dev/null
 
 # Prepare screenshot collection payload
-SOCKET_PAYLOAD=$(node -e 'const key = process.argv[1]; const payload = ["worker:start-screenshot-collection"]; if (key && key.length > 0) { payload.push({ openAiApiKey: key }); } process.stdout.write(JSON.stringify(payload));' "$OPENAI_API_KEY")
+SOCKET_PAYLOAD=$(node -e '
+const openAiKey = process.argv[1] ?? "";
+const anthropicKey = process.argv[2] ?? "";
+const payload = ["worker:start-screenshot-collection"];
+const config = {};
+if (openAiKey.length > 0) {
+  config.openAiApiKey = openAiKey;
+}
+if (anthropicKey.length > 0) {
+  config.anthropicApiKey = anthropicKey;
+}
+if (Object.keys(config).length > 0) {
+  payload.push(config);
+}
+process.stdout.write(JSON.stringify(payload));
+' "$OPENAI_API_KEY" "$ANTHROPIC_API_KEY")
 
 echo "Triggering worker:start-screenshot-collection..."
 curl -s \
