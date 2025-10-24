@@ -474,7 +474,10 @@ export function TaskDetailHeader({
                 </Dropdown.Trigger>
 
                 <Dropdown.Portal>
-                  <Dropdown.Positioner sideOffset={5} className="z-[var(--z-commandbar)]">
+                  <Dropdown.Positioner
+                    sideOffset={5}
+                    className="!z-[var(--z-global-blocking)]"
+                  >
                     <Dropdown.Popup className="min-w-[200px]">
                       <Dropdown.Arrow />
                       {taskRuns?.map((run) => {
