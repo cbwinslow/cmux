@@ -35,7 +35,7 @@ import { typedZid } from "@cmux/shared/utils/typed-zid";
 import { convexQuery } from "@convex-dev/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Code2, Globe2, TerminalSquare, GitCompare, MessageCircle } from "lucide-react";
 import z from "zod";
 
@@ -212,10 +212,10 @@ function EmptyPanelSlot({ position, availablePanels, onAddPanel }: EmptyPanelSlo
             {isOpen && (
               <>
                 <div
-                  className="fixed inset-0 z-10"
+                  className="fixed inset-0 z-[var(--z-overlay)]"
                   onClick={() => setIsOpen(false)}
                 />
-                <div className="absolute left-0 top-full z-20 mt-2 w-48 rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-800">
+                <div className="absolute left-0 top-full z-[var(--z-popover)] mt-2 w-48 rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-800">
                   {availablePanels.map((panelType) => (
                     <button
                       key={panelType}
@@ -271,6 +271,7 @@ function TaskDetailPage() {
   const [panelConfig, setPanelConfig] = useState<PanelConfig>(() => loadPanelConfig());
   const [expandedPanel, setExpandedPanel] = useState<PanelPosition | null>(null);
   const [iframeStatusByKey, setIframeStatusByKey] = useState<Record<string, IframeStatusEntry>>({});
+  const previousSelectedRunIdRef = useRef<string | null>(null);
 
   const handleToggleExpand = useCallback((position: PanelPosition) => {
     setExpandedPanel((current) => (current === position ? null : position));
@@ -357,6 +358,14 @@ function TaskDetailPage() {
   }, [search.runId, taskRunIndex, taskRuns]);
 
   const selectedRunId = selectedRun?._id ?? null;
+  useEffect(() => {
+    const previousRunId = previousSelectedRunIdRef.current;
+    if (previousRunId === selectedRunId) {
+      return;
+    }
+    previousSelectedRunIdRef.current = selectedRunId ?? null;
+    setExpandedPanel(null);
+  }, [selectedRunId]);
   const headerTaskRunId = selectedRunId ?? taskRuns?.[0]?._id ?? null;
 
   const rawWorkspaceUrl = selectedRun?.vscode?.workspaceUrl ?? null;

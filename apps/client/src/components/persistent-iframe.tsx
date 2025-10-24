@@ -316,7 +316,7 @@ export function PersistentIframe({
       overlay.style.top = "0";
       overlay.style.left = "0";
       overlay.style.pointerEvents = "none";
-      overlay.style.zIndex = "var(--z-floating-high, 999999)";
+      overlay.style.zIndex = "var(--z-overlay, 9999)";
       overlay.style.visibility = "hidden";
       overlayRef.current = overlay;
       document.body.appendChild(overlay);
@@ -331,8 +331,8 @@ export function PersistentIframe({
     const resizeObserver =
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(() => {
-            syncOverlayPosition();
-          })
+          syncOverlayPosition();
+        })
         : null;
     resizeObserver?.observe(target);
 
@@ -371,20 +371,20 @@ export function PersistentIframe({
   const overlayElement = overlayRef.current;
   const overlayContent = showErrorOverlay
     ? {
-        node: errorFallback,
-        className: cn(
-          "pointer-events-none flex h-full w-full items-center justify-center bg-neutral-50/90 dark:bg-neutral-950/90",
-          errorClassName,
-        ),
-      }
+      node: errorFallback,
+      className: cn(
+        "pointer-events-none flex h-full w-full items-center justify-center bg-neutral-50/90 dark:bg-neutral-950/90",
+        errorClassName,
+      ),
+    }
     : showLoadingOverlay
       ? {
-          node: loadingFallback,
-          className: cn(
-            "pointer-events-none flex h-full w-full items-center justify-center bg-neutral-50 dark:bg-neutral-950",
-            loadingClassName,
-          ),
-        }
+        node: loadingFallback,
+        className: cn(
+          "pointer-events-none flex h-full w-full items-center justify-center bg-neutral-50 dark:bg-neutral-950",
+          loadingClassName,
+        ),
+      }
       : null;
 
   return (
@@ -396,18 +396,18 @@ export function PersistentIframe({
       />
       {overlayElement && overlayContent && shouldShowOverlay
         ? createPortal(
-            <div className={overlayContent.className}>
-              <div className="pointer-events-auto flex flex-col items-center gap-3 text-center">
-                {overlayContent.node}
-                {resumeMessage ? (
-                  <p className="text-sm text-neutral-600 dark:text-neutral-300">
-                    {resumeMessage}
-                  </p>
-                ) : null}
-              </div>
-            </div>,
-            overlayElement,
-          )
+          <div className={overlayContent.className}>
+            <div className="pointer-events-auto flex flex-col items-center gap-3 text-center">
+              {overlayContent.node}
+              {resumeMessage ? (
+                <p className="text-sm text-neutral-600 dark:text-neutral-300">
+                  {resumeMessage}
+                </p>
+              ) : null}
+            </div>
+          </div>,
+          overlayElement,
+        )
         : null}
     </>
   );

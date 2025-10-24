@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import type { LucideIcon } from "lucide-react";
 import { X, RotateCcw, GripVertical, MessageSquare, Code2, TerminalSquare, Globe2, GitCompare, Plus } from "lucide-react";
 import clsx from "clsx";
@@ -120,8 +121,8 @@ export function PanelConfigModal({ isOpen, onClose, config, onChange }: PanelCon
     );
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+  const modalContent = (
+    <div className="fixed inset-0 z-[var(--z-global-blocking)] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="relative w-full max-w-2xl rounded-lg border border-neutral-200 bg-white p-6 shadow-xl dark:border-neutral-800 dark:bg-neutral-900">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
@@ -169,4 +170,10 @@ export function PanelConfigModal({ isOpen, onClose, config, onChange }: PanelCon
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") {
+    return modalContent;
+  }
+
+  return createPortal(modalContent, document.body);
 }

@@ -500,5 +500,16 @@ pre,
 /* Prevent anchor dragging in Electron only */
 .is-electron a {
   -webkit-user-drag: none;
-  user-drag: none;
+}
+
+/* Ensure Command Bar (cmdk) overlay is always on top */
+[cmdk-overlay],
+[cmdk-dialog] {
+  z-index: var(--z-commandbar) !important;
+}
+
+/* Ensure Radix UI Popovers appear above iframes */
+[data-radix-popper-content-wrapper],
+[data-radix-portal] {
+  z-index: var(--z-popover) !important;
 }
