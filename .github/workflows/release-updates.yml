@@ -317,10 +317,7 @@ jobs:
   # New: build & publish a macOS Universal app by merging the x64 and arm64 zips
   mac-universal:
     name: macOS universal
-    needs:
-      - prepare-release
-      - mac-x64
-      - mac-arm64
+    needs: prepare-release
     environment: electron
     runs-on: cmuxs-Mac-mini
     steps:
