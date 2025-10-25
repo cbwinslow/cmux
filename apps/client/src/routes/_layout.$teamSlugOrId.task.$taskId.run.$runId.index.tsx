@@ -62,6 +62,7 @@ function TaskRunComponent() {
     : false;
   const persistKey = getTaskRunPersistKey(taskRunId);
   const hasWorkspace = workspaceUrl !== null;
+  const isLocalWorkspace = taskRun?.data?.vscode?.provider === "other";
   const [iframeStatus, setIframeStatus] =
     useState<PersistentIframeStatus>("loading");
 
@@ -84,8 +85,11 @@ function TaskRunComponent() {
   );
 
   const loadingFallback = useMemo(
-    () => <WorkspaceLoadingIndicator variant="vscode" status="loading" />,
-    []
+    () =>
+      isLocalWorkspace
+        ? null
+        : <WorkspaceLoadingIndicator variant="vscode" status="loading" />,
+    [isLocalWorkspace]
   );
   const errorFallback = useMemo(
     () => <WorkspaceLoadingIndicator variant="vscode" status="error" />,
@@ -124,17 +128,19 @@ function TaskRunComponent() {
           ) : (
             <div className="grow" />
           )}
-          <div
-            className={clsx(
-              "absolute inset-0 flex items-center justify-center transition pointer-events-none",
-              {
-                "opacity-100": !hasWorkspace,
-                "opacity-0": hasWorkspace,
-              }
-            )}
-          >
-            <WorkspaceLoadingIndicator variant="vscode" status="loading" />
-          </div>
+          {!isLocalWorkspace ? (
+            <div
+              className={clsx(
+                "absolute inset-0 flex items-center justify-center transition pointer-events-none",
+                {
+                  "opacity-100": !hasWorkspace,
+                  "opacity-0": hasWorkspace,
+                }
+              )}
+            >
+              <WorkspaceLoadingIndicator variant="vscode" status="loading" />
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

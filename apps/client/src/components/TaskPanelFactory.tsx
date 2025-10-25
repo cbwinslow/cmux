@@ -391,7 +391,8 @@ const RenderPanelComponent = (props: PanelFactoryProps): ReactNode => {
       } = props;
 
       if (!PersistentWebView || !WorkspaceLoadingIndicator) return null;
-      const shouldShowWorkspaceLoader = Boolean(selectedRun) && !workspaceUrl;
+      const isLocalWorkspace = selectedRun?.vscode?.provider === "other";
+      const shouldShowWorkspaceLoader = Boolean(selectedRun) && !workspaceUrl && !isLocalWorkspace;
       const disablePreflight = rawWorkspaceUrl
         ? shouldUseServerIframePreflight(rawWorkspaceUrl)
         : false;

@@ -31,7 +31,9 @@ export async function ensureVSCodeServeWeb(
 
   const executable = await getVSCodeExecutable(logger);
   if (!executable) {
-    logger.warn("VS Code CLI executable unavailable; serve-web will not be launched.");
+    logger.warn(
+      "VS Code CLI executable unavailable; serve-web will not be launched."
+    );
     return null;
   }
 
@@ -40,9 +42,13 @@ export async function ensureVSCodeServeWeb(
   if (!portAvailable) {
     if (!unavailableServeWebPorts.has(port)) {
       unavailableServeWebPorts.add(port);
-      logger.warn(`VS Code serve-web skipped because port ${port} is not available.`);
+      logger.warn(
+        `VS Code serve-web skipped because port ${port} is not available.`
+      );
     } else {
-      logger.debug?.(`VS Code serve-web still unavailable on port ${port}; skipping launch.`);
+      logger.debug?.(
+        `VS Code serve-web still unavailable on port ${port}; skipping launch.`
+      );
     }
     return null;
   }
@@ -57,29 +63,38 @@ export async function ensureVSCodeServeWeb(
         "serve-web",
         "--accept-server-license-terms",
         "--without-connection-token",
+        "--enable-proposed-api",
         "--port",
         String(port),
       ],
       {
         detached: true,
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
       }
     );
+
+    attachServeWebProcessLogging(child, logger);
 
     child.on("error", (error) => {
       logger.error("VS Code serve-web process error:", error);
     });
 
     child.on("exit", (code, signal) => {
-      logger.info(
+      const exitMessage =
         `VS Code serve-web process exited${
           typeof code === "number" ? ` with code ${code}` : ""
         }${signal ? ` due to signal ${signal}` : ""}.`
-      );
+      if (code === 0 && !signal) {
+        logger.info(exitMessage);
+      } else {
+        logger.warn(exitMessage);
+      }
     });
 
     child.unref();
-    logger.info(`Launched VS Code serve-web on port ${port}.`);
+    logger.info(
+      `Launched VS Code serve-web on port ${port} (pid ${child.pid ?? "unknown"}).`
+    );
 
     await warmUpVSCodeServeWeb(port, logger);
 
@@ -99,11 +114,7 @@ export function stopVSCodeServeWeb(
   }
 
   const { process: child, port } = handle;
-  if (
-    child.killed ||
-    child.exitCode !== null ||
-    child.signalCode !== null
-  ) {
+  if (child.killed || child.exitCode !== null || child.signalCode !== null) {
     return;
   }
 
@@ -231,6 +242,9 @@ async function warmUpVSCodeServeWeb(port: number, logger: Logger) {
         logger.info("VS Code serve-web warm-up succeeded.");
         return;
       }
+      logger.debug?.(
+        `VS Code serve-web warm-up response: ${response.status} ${response.statusText}`
+      );
     } catch (error) {
       logger.debug?.("VS Code serve-web warm-up attempt failed:", error);
     }
@@ -241,4 +255,45 @@ async function warmUpVSCodeServeWeb(port: number, logger: Logger) {
   logger.warn(
     "VS Code serve-web did not respond with HTTP 200 during warm-up window."
   );
+}
+
+function attachServeWebProcessLogging(child: ChildProcess, logger: Logger) {
+  const debugLog = logger.debug ?? logger.info;
+
+  pipeStreamLines(child.stdout, (line) => {
+    debugLog(`[VS Code serve-web stdout] ${line}`);
+  });
+
+  pipeStreamLines(child.stderr, (line) => {
+    logger.warn(`[VS Code serve-web stderr] ${line}`);
+  });
+}
+
+function pipeStreamLines(
+  stream: NodeJS.ReadableStream | null | undefined,
+  onLine: (line: string) => void
+) {
+  if (!stream) {
+    return;
+  }
+
+  let buffered = "";
+
+  stream.on("data", (chunk: Buffer | string) => {
+    buffered += chunk.toString();
+
+    let newlineIndex = buffered.indexOf("\n");
+    while (newlineIndex !== -1) {
+      const line = buffered.slice(0, newlineIndex).replace(/\r$/, "");
+      onLine(line);
+      buffered = buffered.slice(newlineIndex + 1);
+      newlineIndex = buffered.indexOf("\n");
+    }
+  });
+
+  stream.on("end", () => {
+    if (buffered.length > 0) {
+      onLine(buffered.replace(/\r$/, ""));
+    }
+  });
 }

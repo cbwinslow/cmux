@@ -71,6 +71,7 @@ function VSCodeComponent() {
     : false;
   const persistKey = getTaskRunPersistKey(taskRunId);
   const hasWorkspace = workspaceUrl !== null;
+  const isLocalWorkspace = taskRun?.data?.vscode?.provider === "other";
 
   const [iframeStatus, setIframeStatus] =
     useState<PersistentIframeStatus>("loading");
@@ -93,8 +94,11 @@ function VSCodeComponent() {
   );
 
   const loadingFallback = useMemo(
-    () => <WorkspaceLoadingIndicator variant="vscode" status="loading" />,
-    []
+    () =>
+      isLocalWorkspace
+        ? null
+        : <WorkspaceLoadingIndicator variant="vscode" status="loading" />,
+    [isLocalWorkspace]
   );
   const errorFallback = useMemo(
     () => <WorkspaceLoadingIndicator variant="vscode" status="error" />,
@@ -133,7 +137,7 @@ function VSCodeComponent() {
           ) : (
             <div className="grow" />
           )}
-          {!hasWorkspace ? (
+          {!hasWorkspace && !isLocalWorkspace ? (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <WorkspaceLoadingIndicator variant="vscode" status="loading" />
             </div>

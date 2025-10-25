@@ -632,6 +632,7 @@ export function setupSocketHandlers(
           teamSlugOrId: requestedTeamSlugOrId,
           projectFullName,
           repoUrl: explicitRepoUrl,
+          branch: requestedBranch,
         } = parsed.data;
         const teamSlugOrId = requestedTeamSlugOrId || safeTeam;
 
@@ -659,6 +660,7 @@ export function setupSocketHandlers(
           (projectFullName
             ? `https://github.com/${projectFullName}.git`
             : undefined);
+        const branch = requestedBranch?.trim();
         const repoName = deriveRepoBaseName({ projectFullName, repoUrl });
 
         try {
@@ -679,37 +681,79 @@ export function setupSocketHandlers(
           const workspacePath = path.join(workspaceRoot, workspaceName);
 
           await fs.mkdir(workspaceRoot, { recursive: true });
-          try {
-            await fs.mkdir(workspacePath, { recursive: false });
-          } catch (error) {
-            if (
-              error &&
-              typeof error === "object" &&
-              "code" in error &&
-              (error as NodeJS.ErrnoException).code === "EEXIST"
-            ) {
+          const cleanupWorkspace = async () => {
+            await fs.rm(workspacePath, { recursive: true, force: true }).catch(
+              () => undefined,
+            );
+          };
+
+          if (repoUrl) {
+            await cleanupWorkspace();
+            const cloneArgs = ["clone"];
+            if (branch) {
+              cloneArgs.push("--branch", branch, "--single-branch");
+            }
+            cloneArgs.push(repoUrl, workspacePath);
+            try {
+              await execFileAsync("git", cloneArgs, { cwd: workspaceRoot });
+            } catch (error) {
+              await cleanupWorkspace();
+              const message =
+                error &&
+                typeof error === "object" &&
+                "stderr" in error &&
+                typeof (error as { stderr?: unknown }).stderr === "string"
+                  ? ((error as { stderr: string }).stderr.trim() ||
+                    (error instanceof Error ? error.message : ""))
+                  : error instanceof Error
+                    ? error.message
+                    : "Git clone failed";
               throw new Error(
-                `Workspace directory already exists: ${workspacePath}`,
+                message ? `Git clone failed: ${message}` : "Git clone failed",
               );
             }
-            throw error;
-          }
 
-          await execFileAsync("git", ["init"], { cwd: workspacePath });
-          if (repoUrl) {
-            await execFileAsync("git", ["remote", "add", "origin", repoUrl], {
-              cwd: workspacePath,
-            }).catch((error) => {
-              serverLogger.warn(
-                `Failed to set git remote for ${workspacePath}:`,
-                error,
+            try {
+              await execFileAsync(
+                "git",
+                ["rev-parse", "--verify", "HEAD"],
+                { cwd: workspacePath },
               );
-            });
+            } catch (error) {
+              await cleanupWorkspace();
+              throw new Error(
+                error instanceof Error
+                  ? `Git clone failed to produce a checkout: ${error.message}`
+                  : "Git clone failed to produce a checkout",
+              );
+            }
+          } else {
+            try {
+              await fs.mkdir(workspacePath, { recursive: false });
+            } catch (error) {
+              if (
+                error &&
+                typeof error === "object" &&
+                "code" in error &&
+                (error as NodeJS.ErrnoException).code === "EEXIST"
+              ) {
+                throw new Error(
+                  `Workspace directory already exists: ${workspacePath}`,
+                );
+              }
+              throw error;
+            }
+
+            await execFileAsync("git", ["init"], { cwd: workspacePath });
           }
 
-          const descriptor = projectFullName
+          const descriptorBase = projectFullName
             ? `Local workspace ${workspaceName} (${projectFullName})`
             : `Local workspace ${workspaceName}`;
+          const descriptor =
+            descriptorBase && branch
+              ? `${descriptorBase} [${branch}]`
+              : descriptorBase;
 
           const taskId = await getConvex().mutation(api.tasks.create, {
             teamSlugOrId,
@@ -741,10 +785,7 @@ export function setupSocketHandlers(
             status: "running",
           });
 
-          const folderParam = process.env.CMUX_WORKSPACE_DIR
-            ? `/$CMUX_WORKSPACE_DIR/${workspaceName}`
-            : workspacePath;
-          const folderForUrl = folderParam.replace(/\\/g, "/");
+          const folderForUrl = workspacePath.replace(/\\/g, "/");
           const workspaceUrl = `http://localhost:39384/?folder=${encodeURIComponent(
             folderForUrl,
           )}`;
