@@ -9,10 +9,6 @@ import { useArchiveTask } from "@/hooks/useArchiveTask";
 import { useOpenWithActions } from "@/hooks/useOpenWithActions";
 import { isElectron } from "@/lib/electron";
 import { isFakeConvexId } from "@/lib/fakeConvexId";
-import {
-  isLocalWorkspaceRun,
-  isLocalWorkspaceTask,
-} from "@/lib/local-workspace";
 import type { AnnotatedTaskRun, TaskRunWithChildren } from "@/types/task";
 import { ContextMenu } from "@base-ui-components/react/context-menu";
 import { api } from "@cmux/convex/api";
@@ -203,7 +199,7 @@ function TaskTreeInner({
 
   const handleCopyDescription = useCallback(() => {
     if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(task.text).catch(() => { });
+      navigator.clipboard.writeText(task.text).catch(() => {});
     }
   }, [task.text]);
 
@@ -227,7 +223,7 @@ function TaskTreeInner({
 
   const canExpand = true;
   const isCrownEvaluating = task.crownEvaluationStatus === "in_progress";
-  const isLocalWorkspace = isLocalWorkspaceTask(task);
+  const isLocalWorkspace = task.isLocalWorkspace;
 
   const taskLeadingIcon = (() => {
     if (isCrownEvaluating) {
@@ -568,7 +564,11 @@ function TaskRunTreeInner({
   const hasExpandedManually = useRef<Id<"taskRuns"> | null>(null);
 
   useEffect(() => {
-    if (isRunSelected && !isExpanded && hasExpandedManually.current !== run._id) {
+    if (
+      isRunSelected &&
+      !isExpanded &&
+      hasExpandedManually.current !== run._id
+    ) {
       setRunExpanded(run._id, true);
     }
   }, [isExpanded, isRunSelected, run._id, setRunExpanded]);
@@ -594,7 +594,7 @@ function TaskRunTreeInner({
     [isExpanded, run._id, setRunExpanded]
   );
 
-  const isLocalWorkspaceRunEntry = isLocalWorkspaceRun(run);
+  const isLocalWorkspaceRunEntry = run.isLocalWorkspace;
 
   const statusIcon = {
     pending: <Circle className="w-3 h-3 text-neutral-400" />,
@@ -686,7 +686,7 @@ function TaskRunTreeInner({
   const shouldRenderTerminalLink = shouldRenderBrowserLink;
   const shouldRenderPullRequestLink = Boolean(
     (run.pullRequestUrl && run.pullRequestUrl !== "pending") ||
-    run.pullRequests?.some((pr) => pr.url)
+      run.pullRequests?.some((pr) => pr.url)
   );
   const shouldRenderPreviewLink = previewServices.length > 0;
   const hasOpenWithActions = openWithActions.length > 0;
