@@ -18,8 +18,6 @@ export const VSCODE_SERVE_WEB_PORT = 39_384;
 export const LOCAL_VSCODE_HOST_WITH_PORT = `${LOCAL_VSCODE_HOST}:${VSCODE_SERVE_WEB_PORT}`;
 export const LOCAL_VSCODE_ORIGIN = `http://${LOCAL_VSCODE_HOST_WITH_PORT}`;
 const SERVER_READY_TIMEOUT_MS = 15_000;
-export const VSCODE_FRAME_ANCESTORS_HEADER =
-  "frame-ancestors 'self' https://cmux.local http://cmux.local https://www.cmux.sh https://cmux.sh https://www.cmux.dev https://cmux.dev http://localhost:5173 http://localhost:39384 https://localhost:39384;";
 
 let resolvedVSCodeExecutable: string | null = null;
 let currentServeWebBaseUrl: string | null = null;
