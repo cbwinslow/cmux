@@ -2,8 +2,6 @@ import {
   BrowserWindow,
   WebContentsView,
   ipcMain,
-  type OnCompletedListener,
-  type OnDidGetResponseDetailsListener,
   type Rectangle,
   type Session,
   type WebContents,
@@ -282,16 +280,16 @@ function setupEventForwarders(entry: Entry, logger: Logger) {
     webContents.removeListener("did-fail-load", onDidFailLoad);
   });
 
-  const onDidGetResponseDetails: OnDidGetResponseDetailsListener = (
-    _event,
-    _status,
-    newURL,
-    _originalURL,
-    httpResponseCode,
-    _requestMethod,
-    _referrer,
-    _responseHeaders,
-    resourceType,
+  const onDidGetResponseDetails = (
+    _event: Electron.Event,
+    _status: boolean,
+    newURL: string,
+    _originalURL: string,
+    httpResponseCode: number,
+    _requestMethod: string,
+    _referrer: string,
+    _responseHeaders: Record<string, string | string[]>,
+    resourceType: string,
   ) => {
     logger.log("did-get-response-details", {
       id: entry.id,
@@ -301,11 +299,18 @@ function setupEventForwarders(entry: Entry, logger: Logger) {
     });
     // Error handling is done in onDidNavigate
   };
-  webContents.on("did-get-response-details", onDidGetResponseDetails);
+  webContents.on(
+    "did-get-response-details" as unknown as Parameters<WebContents["on"]>[0],
+    onDidGetResponseDetails as unknown as Parameters<WebContents["on"]>[1],
+  );
   cleanup.push(() => {
     webContents.removeListener(
-      "did-get-response-details",
-      onDidGetResponseDetails,
+      "did-get-response-details" as unknown as Parameters<
+        WebContents["removeListener"]
+      >[0],
+      onDidGetResponseDetails as unknown as Parameters<
+        WebContents["removeListener"]
+      >[1],
     );
   });
 
@@ -317,13 +322,10 @@ const registeredSessions = new WeakSet<Session>();
 
 function ensureWebRequestListener(targetSession: Session, _logger: Logger) {
   if (registeredSessions.has(targetSession)) return;
-  const listener: OnCompletedListener = () => {
+  const listener = () => {
     // Error handling is done in onDidNavigate
   };
-  targetSession.webRequest.onCompleted(
-    { urls: ["*://*/*"] },
-    listener as OnCompletedListener,
-  );
+  targetSession.webRequest.onCompleted({ urls: ["*://*/*"] }, listener);
   registeredSessions.add(targetSession);
 }
 

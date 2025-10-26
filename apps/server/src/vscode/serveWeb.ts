@@ -2,16 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access, unlink } from "node:fs/promises";
-import {
-  createServer as createHttpServer,
-  request as httpRequest,
-  type IncomingMessage,
-  type OutgoingHttpHeaders,
-  type Server as HttpServer,
-  type ServerResponse,
-} from "node:http";
-import { connect as connectSocket, type AddressInfo } from "node:net";
-import type { Duplex } from "node:stream";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -24,25 +15,28 @@ type Logger = {
 };
 
 const execFileAsync = promisify(execFile);
-const PROXY_HOST = "127.0.0.1";
-const DEFAULT_PROXY_PORT = 0;
+export const LOCAL_VSCODE_HOST =
+  process.env.CMUX_VSCODE_PUBLIC_HOST?.trim() || "cmux-vscode.local";
 const SOCKET_READY_TIMEOUT_MS = 15_000;
-const FRAME_ANCESTORS_HEADER =
-  "frame-ancestors 'self' https://cmux.local http://cmux.local https://www.cmux.sh https://cmux.sh https://www.cmux.dev https://cmux.dev http://localhost:5173 http://cmux-vscode.localhost https://cmux-vscode.localhost http://cmux-vscode.local https://cmux-vscode.local;";
+export const VSCODE_FRAME_ANCESTORS_HEADER =
+  "frame-ancestors 'self' https://cmux.local http://cmux.local https://www.cmux.sh https://cmux.sh https://www.cmux.dev https://cmux.dev http://localhost:5173 http://cmux-vscode.local https://cmux-vscode.local http://cmux-vscode.localhost https://cmux-vscode.localhost;";
 
 let resolvedVSCodeExecutable: string | null = null;
 let currentServeWebBaseUrl: string | null = null;
+let currentServeWebSocketPath: string | null = null;
 
 export type VSCodeServeWebHandle = {
   process: ChildProcess;
   executable: string;
-  proxyPort: number | null;
-  proxyServer: HttpServer | null;
-  socketPath: string | null;
+  socketPath: string;
 };
 
 export function getVSCodeServeWebBaseUrl(): string | null {
   return currentServeWebBaseUrl;
+}
+
+export function getVSCodeServeWebSocketPath(): string | null {
+  return currentServeWebSocketPath;
 }
 
 export async function waitForVSCodeServeWebBaseUrl(
@@ -64,8 +58,7 @@ export async function waitForVSCodeServeWebBaseUrl(
 }
 
 export async function ensureVSCodeServeWeb(
-  logger: Logger,
-  options?: { port?: number }
+  logger: Logger
 ): Promise<VSCodeServeWebHandle | null> {
   logger.info("Ensuring VS Code serve-web availability...");
 
@@ -85,7 +78,6 @@ export async function ensureVSCodeServeWeb(
   }
 
   const socketPath = createSocketPath();
-  const requestedPort = options?.port ?? DEFAULT_PROXY_PORT;
 
   let child: ChildProcess | null = null;
 
@@ -130,35 +122,26 @@ export async function ensureVSCodeServeWeb(
         logger.info("Clearing cached VS Code serve-web base URL");
         currentServeWebBaseUrl = null;
       }
+      currentServeWebSocketPath = null;
     });
 
     child!.unref();
 
-    await waitForSocket(socketPath, logger);
+    await waitForSocket(socketPath);
 
-    logger.info(
-      "VS Code serve-web socket is ready; starting local proxy server..."
-    );
-    const { server: proxyServer, port: proxyPort } = await startServeWebProxy({
-      logger,
-      socketPath,
-      requestedPort,
-    });
-
-    const baseUrl = `http://${PROXY_HOST}:${proxyPort}`;
+    currentServeWebSocketPath = socketPath;
+    const baseUrl = `http://${LOCAL_VSCODE_HOST}`;
     currentServeWebBaseUrl = baseUrl;
 
     logger.info(
-      `Launched VS Code serve-web proxy at ${baseUrl} (pid ${child.pid ?? "unknown"}).`
+      `VS Code serve-web ready at ${baseUrl} (pid ${child.pid ?? "unknown"}).`
     );
 
-    await warmUpVSCodeServeWeb(baseUrl, logger);
+    await warmUpVSCodeServeWeb(socketPath, logger);
 
     return {
       process: child!,
       executable,
-      proxyPort,
-      proxyServer,
       socketPath,
     };
   } catch (error) {
@@ -179,6 +162,7 @@ export async function ensureVSCodeServeWeb(
       // ignore cleanup errors here
     }
     currentServeWebBaseUrl = null;
+    currentServeWebSocketPath = null;
     return null;
   }
 }
@@ -191,39 +175,31 @@ export function stopVSCodeServeWeb(
     return;
   }
 
-  const { process: child } = handle;
+  const { process: child, socketPath } = handle;
+
+  currentServeWebBaseUrl = null;
+  currentServeWebSocketPath = null;
+
+  void unlink(socketPath).catch((error) => {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return;
+    }
+    logger.warn(
+      `Failed to remove VS Code serve-web socket at ${socketPath}:`,
+      error
+    );
+  });
+
   if (child.killed || child.exitCode !== null || child.signalCode !== null) {
     return;
   }
 
   logger.info("Stopping VS Code serve-web process...");
-  currentServeWebBaseUrl = null;
-  if (handle.proxyServer) {
-    handle.proxyServer.close((error) => {
-      if (error) {
-        logger.warn(
-          "Error while shutting down VS Code serve-web proxy:",
-          error
-        );
-      }
-    });
-  }
-  if (handle.socketPath) {
-    void unlink(handle.socketPath).catch((error) => {
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        (error as NodeJS.ErrnoException).code === "ENOENT"
-      ) {
-        return;
-      }
-      logger.warn(
-        `Failed to remove VS Code serve-web socket at ${handle.socketPath}:`,
-        error
-      );
-    });
-  }
   try {
     child.kill();
   } catch (error) {
@@ -308,25 +284,38 @@ async function resolveVSCodeExecutable(logger: Logger) {
   return resolvedVSCodeExecutable;
 }
 
-async function warmUpVSCodeServeWeb(baseUrl: string, logger: Logger) {
+async function warmUpVSCodeServeWeb(
+  socketPath: string,
+  logger: Logger
+) {
   const warmupDeadline = Date.now() + 10_000;
-  const endpoint = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
 
   while (Date.now() < warmupDeadline) {
     try {
-      const response = await fetch(endpoint, { redirect: "manual" });
-      if (response.status === 200) {
-        logger.info("VS Code serve-web warm-up succeeded.");
-        return;
-      }
-      logger.debug?.(
-        `VS Code serve-web warm-up response: ${response.status} ${response.statusText}`
-      );
+      await new Promise<void>((resolve, reject) => {
+        const req = httpRequest(
+          {
+            socketPath,
+            method: "GET",
+            path: "/",
+            headers: {
+              host: LOCAL_VSCODE_HOST,
+            },
+          },
+          (res) => {
+            res.resume();
+            res.on("end", resolve);
+          }
+        );
+        req.on("error", reject);
+        req.end();
+      });
+      logger.info("VS Code serve-web warm-up succeeded.");
+      return;
     } catch (error) {
       logger.debug?.("VS Code serve-web warm-up attempt failed:", error);
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
-
-    await new Promise<void>((resolve) => setTimeout(resolve, 500));
   }
 
   logger.warn(
@@ -397,7 +386,7 @@ async function removeStaleSocket(socketPath: string, logger: Logger) {
   }
 }
 
-async function waitForSocket(socketPath: string, logger: Logger) {
+async function waitForSocket(socketPath: string) {
   const deadline = Date.now() + SOCKET_READY_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
@@ -421,186 +410,4 @@ async function waitForSocket(socketPath: string, logger: Logger) {
   throw new Error(
     `VS Code serve-web socket ${socketPath} was not ready within ${SOCKET_READY_TIMEOUT_MS} ms`
   );
-}
-
-async function startServeWebProxy({
-  logger,
-  socketPath,
-  requestedPort,
-}: {
-  logger: Logger;
-  socketPath: string;
-  requestedPort: number;
-}): Promise<{ server: HttpServer; port: number }> {
-  const server = createHttpServer((req, res) => {
-    forwardHttpRequest({
-      logger,
-      socketPath,
-      request: req,
-      response: res,
-    });
-  });
-
-  server.on("upgrade", (req, clientSocket, head) => {
-    handleWebSocketUpgrade({
-      logger,
-      socketPath,
-      request: req,
-      clientSocket,
-      head,
-    });
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error) => {
-      server.off("error", onError);
-      reject(error);
-    };
-
-    server.once("error", onError);
-    server.listen(requestedPort, PROXY_HOST, () => {
-      server.off("error", onError);
-      resolve();
-    });
-  });
-
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    server.close();
-    throw new Error(
-      "Failed to determine VS Code serve-web proxy server address"
-    );
-  }
-
-  return { server, port: (address as AddressInfo).port };
-}
-
-function forwardHttpRequest({
-  logger,
-  socketPath,
-  request,
-  response,
-}: {
-  logger: Logger;
-  socketPath: string;
-  request: IncomingMessage;
-  response: ServerResponse;
-}) {
-  const targetPath = request.url ?? "/";
-  const proxyReq = httpRequest(
-    {
-      socketPath,
-      method: request.method,
-      path: targetPath,
-      headers: request.headers,
-    },
-    (proxyRes) => {
-      const headers = rewriteResponseHeaders(proxyRes.headers);
-
-      if (request.method === "HEAD") {
-        response.writeHead(proxyRes.statusCode ?? 200, headers);
-        proxyRes.resume();
-        response.end();
-        return;
-      }
-
-      response.writeHead(proxyRes.statusCode ?? 200, headers);
-      proxyRes.pipe(response);
-    }
-  );
-
-  proxyReq.on("error", (error) => {
-    logger.error("VS Code serve-web proxy HTTP error:", error);
-    if (!response.destroyed) {
-      response.writeHead(502, { "content-type": "text/plain" });
-      response.end("Failed to reach VS Code serve-web backend.");
-    }
-  });
-
-  request.pipe(proxyReq);
-}
-
-function rewriteResponseHeaders(
-  headers: IncomingMessage["headers"]
-): OutgoingHttpHeaders {
-  const rewritten: OutgoingHttpHeaders = {};
-
-  for (const [key, value] of Object.entries(headers)) {
-    if (typeof value === "undefined") {
-      continue;
-    }
-    rewritten[key] = value;
-  }
-
-  rewritten["content-security-policy"] = FRAME_ANCESTORS_HEADER;
-  rewritten["access-control-allow-origin"] = "*";
-  rewritten["access-control-allow-credentials"] = "true";
-  rewritten["access-control-allow-methods"] =
-    "GET,HEAD,POST,PUT,DELETE,PATCH,OPTIONS";
-  rewritten["access-control-allow-headers"] =
-    "*, Authorization, Content-Type, Content-Length, X-Requested-With";
-
-  return rewritten;
-}
-
-function handleWebSocketUpgrade({
-  logger,
-  socketPath,
-  request,
-  clientSocket,
-  head,
-}: {
-  logger: Logger;
-  socketPath: string;
-  request: IncomingMessage;
-  clientSocket: Duplex;
-  head: Buffer;
-}) {
-  const upstream = connectSocket(socketPath);
-
-  upstream.on("connect", () => {
-    const headerLines: string[] = [];
-    for (const [name, value] of Object.entries(request.headers)) {
-      if (typeof value === "undefined") {
-        continue;
-      }
-      if (Array.isArray(value)) {
-        for (const entry of value) {
-          headerLines.push(`${name}: ${entry}`);
-        }
-      } else {
-        headerLines.push(`${name}: ${value}`);
-      }
-    }
-
-    const headers = [
-      `${request.method ?? "GET"} ${request.url ?? "/"} HTTP/${request.httpVersion}`,
-      ...headerLines,
-      "",
-      "",
-    ].join("\r\n");
-
-    upstream.write(headers);
-    upstream.write(head);
-
-    upstream.pipe(clientSocket);
-    clientSocket.pipe(upstream);
-  });
-
-  const closeWithError = (error: Error) => {
-    logger.error("VS Code serve-web proxy WebSocket error:", error);
-    try {
-      clientSocket.destroy();
-    } catch {
-      // ignore
-    }
-    try {
-      upstream.destroy();
-    } catch {
-      // ignore
-    }
-  };
-
-  upstream.on("error", closeWithError);
-  clientSocket.on("error", closeWithError);
 }
