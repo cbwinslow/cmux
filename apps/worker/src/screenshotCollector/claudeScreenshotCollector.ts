@@ -84,11 +84,12 @@ Please:
 4. Take full-page screenshots as well as element-specific screenshots of each relevant UI view that was changed
 5. Save screenshots to ${outputDir} with descriptive names like "homepage-${branch}.png"
 
+<IMPORTANT>
 Focus on capturing visual changes. If no UI changes are present, just let me know.
 Do not close the browser after you're done, since I will want to click around the final page you navigated to.
 Do not create summary documents.
-
-Save all screenshots and provide a summary of what you captured.`;
+If you can't install dependencies/start the dev server, just let me know. Do not create fake html mocks.
+</IMPORTANT>`;
 
   await logToScreenshotCollector(
     `Starting Claude Agent with browser MCP for branch: ${branch}`
