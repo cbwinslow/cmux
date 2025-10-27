@@ -1,3 +1,5 @@
+import { rewriteLocalWorkspaceUrlIfNeeded } from "./localServeWebOrigin";
+
 const MORPH_HOST_REGEX = /^port-(\d+)-morphvm-([^.]+)\.http\.cloud\.morph\.so$/;
 
 interface MorphUrlComponents {
@@ -46,10 +48,11 @@ function createMorphPortUrl(
 }
 
 export function toProxyWorkspaceUrl(workspaceUrl: string): string {
-  const components = parseMorphUrl(workspaceUrl);
+  const normalizedUrl = rewriteLocalWorkspaceUrlIfNeeded(workspaceUrl);
+  const components = parseMorphUrl(normalizedUrl);
 
   if (!components) {
-    return workspaceUrl;
+    return normalizedUrl;
   }
 
   const scope = "base"; // Default scope

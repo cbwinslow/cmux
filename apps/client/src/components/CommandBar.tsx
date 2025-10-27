@@ -7,6 +7,8 @@ import { copyAllElectronLogs } from "@/lib/electron-logs/electron-logs";
 import { setLastTeamSlugOrId } from "@/lib/lastTeam";
 import { stackClientApp } from "@/lib/stack";
 import { preloadTaskRunIframes } from "@/lib/preloadTaskRunIframes";
+import { rewriteLocalWorkspaceUrlIfNeeded } from "@/lib/localServeWebOrigin";
+import { useLocalVSCodeServeWebQuery } from "@/queries/local-vscode-serve-web";
 import { toProxyWorkspaceUrl } from "@/lib/toProxyWorkspaceUrl";
 import { api } from "@cmux/convex/api";
 import type { Doc, Id } from "@cmux/convex/dataModel";
@@ -133,6 +135,7 @@ export function CommandBar({ teamSlugOrId }: CommandBarProps) {
   const { setTheme } = useTheme();
   const { addTaskToExpand } = useExpandTasks();
   const { socket } = useSocket();
+  const localServeWeb = useLocalVSCodeServeWebQuery();
   const preloadTeamDashboard = useCallback(
     async (targetTeamSlugOrId: string | undefined) => {
       if (!targetTeamSlugOrId) return;
@@ -362,7 +365,13 @@ export function CommandBar({ teamSlugOrId }: CommandBarProps) {
                 );
 
                 if (response.workspaceUrl && effectiveTaskRunId) {
-                  const proxiedUrl = toProxyWorkspaceUrl(response.workspaceUrl);
+                  const normalizedWorkspaceUrl = rewriteLocalWorkspaceUrlIfNeeded(
+                    response.workspaceUrl,
+                    localServeWeb.data?.baseUrl,
+                  );
+                  const proxiedUrl = toProxyWorkspaceUrl(
+                    normalizedWorkspaceUrl,
+                  );
                   if (proxiedUrl) {
                     void preloadTaskRunIframes([
                       { url: proxiedUrl, taskRunId: effectiveTaskRunId },
@@ -390,7 +399,12 @@ export function CommandBar({ teamSlugOrId }: CommandBarProps) {
                     },
                   });
                 } else if (response.workspaceUrl) {
-                  window.location.assign(response.workspaceUrl);
+                  window.location.assign(
+                    rewriteLocalWorkspaceUrlIfNeeded(
+                      response.workspaceUrl,
+                      localServeWeb.data?.baseUrl,
+                    ),
+                  );
                 }
               } catch (callbackError) {
                 const message =
@@ -423,6 +437,7 @@ export function CommandBar({ teamSlugOrId }: CommandBarProps) {
       addTaskToExpand,
       failTaskRun,
       isCreatingLocalWorkspace,
+      localServeWeb.data?.baseUrl,
       navigate,
       reserveLocalWorkspace,
       router,
