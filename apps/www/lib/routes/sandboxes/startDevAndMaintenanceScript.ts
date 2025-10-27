@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { MorphInstance } from "./git";
 import { singleQuote } from "./shell";
 
@@ -19,6 +20,25 @@ export type ScriptIdentifiers = {
   };
 };
 
+const orchestratorScriptConfigSchema = z.object({
+  workspaceRoot: z.string(),
+  runtimeDir: z.string(),
+  maintenanceScriptPath: z.string(),
+  devScriptPath: z.string(),
+  maintenanceWindowName: z.string(),
+  devWindowName: z.string(),
+  maintenanceExitCodePath: z.string(),
+  maintenanceErrorLogPath: z.string(),
+  devExitCodePath: z.string(),
+  devErrorLogPath: z.string(),
+  hasMaintenanceScript: z.boolean(),
+  hasDevScript: z.boolean(),
+  convexUrl: z.string(),
+  taskRunJwt: z.string(),
+});
+
+type OrchestratorScriptConfig = z.infer<typeof orchestratorScriptConfigSchema>;
+
 export const allocateScriptIdentifiers = (): ScriptIdentifiers => {
   return {
     maintenance: {
@@ -32,7 +52,36 @@ export const allocateScriptIdentifiers = (): ScriptIdentifiers => {
   };
 };
 
-const ORCHESTRATOR_TEMPLATE = `#!/usr/bin/env bun
+const buildOrchestratorScript = (
+  config: OrchestratorScriptConfig,
+): string => {
+  const parsedConfig = orchestratorScriptConfigSchema.safeParse(config);
+  if (!parsedConfig.success) {
+    throw new Error(
+      `Failed to generate orchestrator script: ${parsedConfig.error.message}`,
+    );
+  }
+
+  const literal = (value: string): string => JSON.stringify(value);
+
+  const {
+    workspaceRoot,
+    runtimeDir,
+    maintenanceScriptPath,
+    devScriptPath,
+    maintenanceWindowName,
+    devWindowName,
+    maintenanceExitCodePath,
+    maintenanceErrorLogPath,
+    devExitCodePath,
+    devErrorLogPath,
+    hasMaintenanceScript,
+    hasDevScript,
+    convexUrl,
+    taskRunJwt,
+  } = parsedConfig.data;
+
+  return `#!/usr/bin/env bun
 /**
  * Orchestrator script for running maintenance and dev scripts in sequence.
  * This script runs in the background to avoid Vercel timeouts.
@@ -45,20 +94,20 @@ const ORCHESTRATOR_TEMPLATE = `#!/usr/bin/env bun
 
 import { $ } from "bun";
 
-const WORKSPACE_ROOT = "{{WORKSPACE_ROOT}}";
-const CMUX_RUNTIME_DIR = "{{CMUX_RUNTIME_DIR}}";
-const MAINTENANCE_SCRIPT_PATH = "{{MAINTENANCE_SCRIPT_PATH}}";
-const DEV_SCRIPT_PATH = "{{DEV_SCRIPT_PATH}}";
-const MAINTENANCE_WINDOW_NAME = "{{MAINTENANCE_WINDOW_NAME}}";
-const DEV_WINDOW_NAME = "{{DEV_WINDOW_NAME}}";
-const MAINTENANCE_EXIT_CODE_PATH = "{{MAINTENANCE_EXIT_CODE_PATH}}";
-const MAINTENANCE_ERROR_LOG_PATH = "{{MAINTENANCE_ERROR_LOG_PATH}}";
-const DEV_EXIT_CODE_PATH = "{{DEV_EXIT_CODE_PATH}}";
-const DEV_ERROR_LOG_PATH = "{{DEV_ERROR_LOG_PATH}}";
-const HAS_MAINTENANCE_SCRIPT = "{{HAS_MAINTENANCE_SCRIPT}}" === "true";
-const HAS_DEV_SCRIPT = "{{HAS_DEV_SCRIPT}}" === "true";
-const CONVEX_URL = "{{CONVEX_URL}}";
-const TASK_RUN_JWT = "{{TASK_RUN_JWT}}";
+const WORKSPACE_ROOT = ${literal(workspaceRoot)};
+const CMUX_RUNTIME_DIR = ${literal(runtimeDir)};
+const MAINTENANCE_SCRIPT_PATH = ${literal(maintenanceScriptPath)};
+const DEV_SCRIPT_PATH = ${literal(devScriptPath)};
+const MAINTENANCE_WINDOW_NAME = ${literal(maintenanceWindowName)};
+const DEV_WINDOW_NAME = ${literal(devWindowName)};
+const MAINTENANCE_EXIT_CODE_PATH = ${literal(maintenanceExitCodePath)};
+const MAINTENANCE_ERROR_LOG_PATH = ${literal(maintenanceErrorLogPath)};
+const DEV_EXIT_CODE_PATH = ${literal(devExitCodePath)};
+const DEV_ERROR_LOG_PATH = ${literal(devErrorLogPath)};
+const HAS_MAINTENANCE_SCRIPT = ${hasMaintenanceScript};
+const HAS_DEV_SCRIPT = ${hasDevScript};
+const CONVEX_URL = ${literal(convexUrl)};
+const TASK_RUN_JWT = ${literal(taskRunJwt)};
 
 async function waitForTmuxSession(): Promise<void> {
   for (let i = 0; i < 20; i++) {
@@ -296,7 +345,7 @@ async function startDevScript(): Promise<{ error: string | null }> {
           console.error("[DEV] Failed to read error log:", logError);
         }
 
-        const errorMessage = errorDetails || \`Dev script failed with exit code \${exitCode}\`;
+      const errorMessage = errorDetails || \`Dev script failed with exit code \${exitCode}\`;
 
         return { error: errorMessage };
       }
@@ -355,6 +404,7 @@ async function startDevScript(): Promise<{ error: string | null }> {
   }
 })();
 `;
+};
 
 export async function runMaintenanceAndDevScripts({
   instance,
@@ -416,22 +466,22 @@ ${devScript}
 `
     : null;
 
-  // Generate orchestrator script by replacing placeholders
-  const orchestratorScript = ORCHESTRATOR_TEMPLATE
-    .replace(/{{WORKSPACE_ROOT}}/g, WORKSPACE_ROOT)
-    .replace(/{{CMUX_RUNTIME_DIR}}/g, CMUX_RUNTIME_DIR)
-    .replace(/{{MAINTENANCE_SCRIPT_PATH}}/g, ids.maintenance.scriptPath)
-    .replace(/{{DEV_SCRIPT_PATH}}/g, ids.dev.scriptPath)
-    .replace(/{{MAINTENANCE_WINDOW_NAME}}/g, ids.maintenance.windowName)
-    .replace(/{{DEV_WINDOW_NAME}}/g, ids.dev.windowName)
-    .replace(/{{MAINTENANCE_EXIT_CODE_PATH}}/g, maintenanceExitCodePath)
-    .replace(/{{MAINTENANCE_ERROR_LOG_PATH}}/g, maintenanceErrorLogPath)
-    .replace(/{{DEV_EXIT_CODE_PATH}}/g, devExitCodePath)
-    .replace(/{{DEV_ERROR_LOG_PATH}}/g, devErrorLogPath)
-    .replace(/{{HAS_MAINTENANCE_SCRIPT}}/g, String(maintenanceScriptContent !== null))
-    .replace(/{{HAS_DEV_SCRIPT}}/g, String(devScriptContent !== null))
-    .replace(/{{CONVEX_URL}}/g, convexUrl || "")
-    .replace(/{{TASK_RUN_JWT}}/g, taskRunJwt || "");
+  const orchestratorScript = buildOrchestratorScript({
+    workspaceRoot: WORKSPACE_ROOT,
+    runtimeDir: CMUX_RUNTIME_DIR,
+    maintenanceScriptPath: ids.maintenance.scriptPath,
+    devScriptPath: ids.dev.scriptPath,
+    maintenanceWindowName: ids.maintenance.windowName,
+    devWindowName: ids.dev.windowName,
+    maintenanceExitCodePath,
+    maintenanceErrorLogPath,
+    devExitCodePath,
+    devErrorLogPath,
+    hasMaintenanceScript,
+    hasDevScript,
+    convexUrl: convexUrl ?? "",
+    taskRunJwt: taskRunJwt ?? "",
+  });
 
   // Create the command that sets up all scripts and starts the orchestrator in background
   const setupAndRunCommand = `set -eu
