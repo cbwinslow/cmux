@@ -5,12 +5,12 @@ import type { Id } from "./_generated/dataModel";
 import { httpAction } from "./_generated/server";
 import { z } from "zod";
 
-const JSON_HEADERS = {
-  "Content-Type": "application/json",
-};
-
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+  return new Response(JSON.stringify(body), {
+    status, headers: {
+      "Content-Type": "application/json",
+    }
+  });
 }
 
 function extractBearerToken(header: string | null): string | null {
