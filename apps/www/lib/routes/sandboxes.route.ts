@@ -312,7 +312,7 @@ sandboxesRouter.openapi(
             maintenanceScript: maintenanceScript || undefined,
             devScript: devScript || undefined,
             identifiers: scriptIdentifiers ?? undefined,
-            convexUrl: body.taskRunJwt ? env.NEXT_PUBLIC_CONVEX_URL : undefined,
+            convexUrl: env.NEXT_PUBLIC_CONVEX_URL ?? undefined,
             taskRunJwt: body.taskRunJwt || undefined,
           });
         })().catch((error) => {
