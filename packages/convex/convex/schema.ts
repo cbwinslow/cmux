@@ -95,6 +95,7 @@ const convexSchema = defineSchema({
     text: v.string(),
     isCompleted: v.boolean(),
     isArchived: v.optional(v.boolean()),
+    isLocalWorkspace: v.optional(v.boolean()),
     description: v.optional(v.string()),
     pullRequestTitle: v.optional(v.string()),
     pullRequestDescription: v.optional(v.string()),
@@ -107,6 +108,14 @@ const convexSchema = defineSchema({
     userId: v.string(), // Link to user who created the task
     teamId: v.string(),
     environmentId: v.optional(v.id("environments")),
+    crownEvaluationStatus: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("in_progress"),
+        v.literal("succeeded"),
+        v.literal("error"),
+      ),
+    ), // State of crown evaluation workflow
     crownEvaluationError: v.optional(v.string()), // Error message if crown evaluation failed
     mergeStatus: v.optional(
       v.union(
@@ -145,6 +154,7 @@ const convexSchema = defineSchema({
       v.literal("completed"),
       v.literal("failed")
     ),
+    isLocalWorkspace: v.optional(v.boolean()),
     // Optional log retained for backward compatibility; no longer written to.
     log: v.optional(v.string()), // CLI output log (deprecated)
     worktreePath: v.optional(v.string()), // Path to the git worktree for this run
@@ -273,9 +283,17 @@ const convexSchema = defineSchema({
     teamId: v.optional(v.string()),
     repoFullName: v.string(),
     repoUrl: v.string(),
-    prNumber: v.number(),
+    prNumber: v.optional(v.number()),
     commitRef: v.string(),
+    headCommitRef: v.optional(v.string()),
+    baseCommitRef: v.optional(v.string()),
     requestedByUserId: v.string(),
+    jobType: v.optional(v.union(v.literal("pull_request"), v.literal("comparison"))),
+    comparisonSlug: v.optional(v.string()),
+    comparisonBaseOwner: v.optional(v.string()),
+    comparisonBaseRef: v.optional(v.string()),
+    comparisonHeadOwner: v.optional(v.string()),
+    comparisonHeadRef: v.optional(v.string()),
     state: v.union(
       v.literal("pending"),
       v.literal("running"),
@@ -300,6 +318,24 @@ const convexSchema = defineSchema({
       "prNumber",
       "updatedAt",
     ])
+    .index("by_team_repo_comparison", [
+      "teamId",
+      "repoFullName",
+      "comparisonSlug",
+      "createdAt",
+    ])
+    .index("by_team_repo_comparison_updated", [
+      "teamId",
+      "repoFullName",
+      "comparisonSlug",
+      "updatedAt",
+    ])
+    .index("by_repo_comparison_commit", [
+      "repoFullName",
+      "comparisonSlug",
+      "commitRef",
+      "updatedAt",
+    ])
     .index("by_state_updated", ["state", "updatedAt"])
     .index("by_team_created", ["teamId", "createdAt"]),
 
@@ -309,8 +345,16 @@ const convexSchema = defineSchema({
     requestedByUserId: v.string(),
     repoFullName: v.string(),
     repoUrl: v.string(),
-    prNumber: v.number(),
+    prNumber: v.optional(v.number()),
     commitRef: v.string(),
+    headCommitRef: v.optional(v.string()),
+    baseCommitRef: v.optional(v.string()),
+    jobType: v.optional(v.union(v.literal("pull_request"), v.literal("comparison"))),
+    comparisonSlug: v.optional(v.string()),
+    comparisonBaseOwner: v.optional(v.string()),
+    comparisonBaseRef: v.optional(v.string()),
+    comparisonHeadOwner: v.optional(v.string()),
+    comparisonHeadRef: v.optional(v.string()),
     sandboxInstanceId: v.optional(v.string()), // `morphvm_` prefix indicates Morph-managed instance IDs
     codeReviewOutput: v.record(v.string(), v.any()),
     createdAt: v.number(),
@@ -322,8 +366,16 @@ const convexSchema = defineSchema({
     jobId: v.id("automatedCodeReviewJobs"),
     teamId: v.optional(v.string()),
     repoFullName: v.string(),
-    prNumber: v.number(),
+    prNumber: v.optional(v.number()),
     commitRef: v.string(),
+    headCommitRef: v.optional(v.string()),
+    baseCommitRef: v.optional(v.string()),
+    jobType: v.optional(v.union(v.literal("pull_request"), v.literal("comparison"))),
+    comparisonSlug: v.optional(v.string()),
+    comparisonBaseOwner: v.optional(v.string()),
+    comparisonBaseRef: v.optional(v.string()),
+    comparisonHeadOwner: v.optional(v.string()),
+    comparisonHeadRef: v.optional(v.string()),
     sandboxInstanceId: v.optional(v.string()),
     filePath: v.string(),
     codexReviewOutput: v.any(),
@@ -336,6 +388,13 @@ const convexSchema = defineSchema({
       "teamId",
       "repoFullName",
       "prNumber",
+      "commitRef",
+      "createdAt",
+    ])
+    .index("by_team_repo_comparison_commit", [
+      "teamId",
+      "repoFullName",
+      "comparisonSlug",
       "commitRef",
       "createdAt",
     ]),
@@ -404,6 +463,7 @@ const convexSchema = defineSchema({
   workspaceSettings: defineTable({
     worktreePath: v.optional(v.string()), // Custom path for git worktrees
     autoPrEnabled: v.optional(v.boolean()), // Auto-create PR for crown winner (default: false)
+    nextLocalWorkspaceSequence: v.optional(v.number()), // Counter for local workspace naming
     createdAt: v.number(),
     updatedAt: v.number(),
     userId: v.string(),

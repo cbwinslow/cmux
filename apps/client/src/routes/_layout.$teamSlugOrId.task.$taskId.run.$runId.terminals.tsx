@@ -477,17 +477,17 @@ function TaskRunTerminals() {
               </button>
             </div>
           </div>
-          {createTerminalErrorMessage ? (
-            <span className="text-xs text-red-500 dark:text-red-400">
-              {createTerminalErrorMessage}
-            </span>
-          ) : null}
-          {deleteTerminalErrorMessage ? (
-            <span className="text-xs text-red-500 dark:text-red-400">
-              {deleteTerminalErrorMessage}
-            </span>
-          ) : null}
         </div>
+        {createTerminalErrorMessage ? (
+          <span className="text-xs text-red-500 dark:text-red-400">
+            {createTerminalErrorMessage}
+          </span>
+        ) : null}
+        {deleteTerminalErrorMessage ? (
+          <span className="text-xs text-red-500 dark:text-red-400">
+            {deleteTerminalErrorMessage}
+          </span>
+        ) : null}
         <div className="relative flex-1 min-h-0 bg-neutral-950">
           {tabsQuery.isLoading ? (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-neutral-300">
