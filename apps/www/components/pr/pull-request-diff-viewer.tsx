@@ -437,7 +437,39 @@ export function PullRequestDiffViewer({
   }, [fileOutputs]);
 
   const sortedFiles = useMemo(() => {
-    return [...files].sort((a, b) => a.filename.localeCompare(b.filename));
+    // Sort files to match the tree structure order
+    // The tree displays files depth-first, so we need to sort by path segments
+    return [...files].sort((a, b) => {
+      const aSegments = a.filename.split("/");
+      const bSegments = b.filename.split("/");
+      const minLength = Math.min(aSegments.length, bSegments.length);
+
+      // Compare segment by segment
+      for (let i = 0; i < minLength; i++) {
+        const aSegment = aSegments[i]!;
+        const bSegment = bSegments[i]!;
+
+        // At the last segment for one of the paths
+        const aIsLast = i === aSegments.length - 1;
+        const bIsLast = i === bSegments.length - 1;
+
+        if (aSegment === bSegment) {
+          // Same segment, continue to next level
+          continue;
+        }
+
+        // If one is a file and one is a directory at this level, directory comes first
+        if (aIsLast && !bIsLast) return 1; // a is file, b is directory
+        if (!aIsLast && bIsLast) return -1; // a is directory, b is file
+
+        // Both are directories or both are files at this level, sort alphabetically
+        return aSegment.localeCompare(bSegment);
+      }
+
+      // One path is a prefix of the other
+      // Shorter path (file in parent dir) comes before longer path (file in subdir)
+      return aSegments.length - bSegments.length;
+    });
   }, [files]);
 
   const totalFileCount = sortedFiles.length;
