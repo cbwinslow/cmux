@@ -35,7 +35,8 @@ function formatContextLine(
   const text = diffLine.length > 1 ? diffLine.slice(1) : "";
   const left = showOld ? padLineNumber(oldLineNumber) : " ".repeat(PAD_WIDTH);
   const right = showNew ? padLineNumber(newLineNumber) : " ".repeat(PAD_WIDTH);
-  return `${marker}${left} ${right} | ${text}`;
+  const separator = showOld && showNew ? "" : " ";
+  return `${marker}${left}${separator}${right} | ${text}`;
 }
 
 function formatWithLineNumbers(normalizedDiff: string, includeContext: boolean): string[] {
