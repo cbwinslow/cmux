@@ -323,6 +323,17 @@ export type GithubPrsFileContentsBatchBody = {
     maxFileBytes?: number;
 };
 
+export type GithubInstallStateResponse = {
+    state: string;
+};
+
+export type GithubInstallStateRequest = {
+    /**
+     * Team slug or UUID
+     */
+    teamSlugOrId: string;
+};
+
 export type SetupInstanceResponse = {
     instanceId: string;
     vscodeUrl: string;
@@ -1461,6 +1472,37 @@ export type PostApiIntegrationsGithubPrsFileContentsBatchResponses = {
 };
 
 export type PostApiIntegrationsGithubPrsFileContentsBatchResponse = PostApiIntegrationsGithubPrsFileContentsBatchResponses[keyof PostApiIntegrationsGithubPrsFileContentsBatchResponses];
+
+export type PostApiIntegrationsGithubInstallStateData = {
+    body: GithubInstallStateRequest;
+    path?: never;
+    query?: never;
+    url: '/api/integrations/github/install-state';
+};
+
+export type PostApiIntegrationsGithubInstallStateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden - user not a member of the team
+     */
+    403: unknown;
+    /**
+     * Server error
+     */
+    500: unknown;
+};
+
+export type PostApiIntegrationsGithubInstallStateResponses = {
+    /**
+     * OK
+     */
+    200: GithubInstallStateResponse;
+};
+
+export type PostApiIntegrationsGithubInstallStateResponse = PostApiIntegrationsGithubInstallStateResponses[keyof PostApiIntegrationsGithubInstallStateResponses];
 
 export type PostApiMorphSetupInstanceData = {
     body: SetupInstanceBody;

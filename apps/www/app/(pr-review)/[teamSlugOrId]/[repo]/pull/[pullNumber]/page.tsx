@@ -26,6 +26,7 @@ import {
   ReviewGitHubLinkButton,
   summarizeFiles,
 } from "../../_components/review-diff-content";
+import { PrivateRepoPrompt } from "../../_components/private-repo-prompt";
 
 type PageParams = {
   teamSlugOrId: string;
@@ -125,45 +126,65 @@ export default async function PullRequestPage({ params }: PageProps) {
     notFound();
   }
 
-  const pullRequestPromise = fetchPullRequest(githubOwner, repo, pullNumber);
-  const pullRequestFilesPromise = fetchPullRequestFiles(
-    githubOwner,
-    repo,
-    pullNumber
-  ).then((files) => files.map(toGithubFileChange));
+  // Check if the PR is accessible
+  try {
+    const pullRequest = await fetchPullRequest(githubOwner, repo, pullNumber);
 
-  scheduleCodeReviewStart({
-    teamSlugOrId: selectedTeam.id,
-    githubOwner,
-    repo,
-    pullNumber,
-    pullRequestPromise,
-  });
+    // If we can fetch the PR, proceed with normal rendering
+    const pullRequestPromise = Promise.resolve(pullRequest);
+    const pullRequestFilesPromise = fetchPullRequestFiles(
+      githubOwner,
+      repo,
+      pullNumber
+    ).then((files) => files.map(toGithubFileChange));
 
-  return (
-    <div className="min-h-dvh bg-neutral-50 text-neutral-900">
-      <div className="flex w-full flex-col gap-8 px-6 pb-16 pt-10 sm:px-8 lg:px-12">
-        <Suspense fallback={<PullRequestHeaderSkeleton />}>
-          <PullRequestHeader
-            promise={pullRequestPromise}
-            githubOwner={githubOwner}
-            repo={repo}
-          />
-        </Suspense>
+    scheduleCodeReviewStart({
+      teamSlugOrId: selectedTeam.id,
+      githubOwner,
+      repo,
+      pullNumber,
+      pullRequestPromise,
+    });
 
-        <Suspense fallback={<DiffViewerSkeleton />}>
-          <PullRequestDiffSection
-            filesPromise={pullRequestFilesPromise}
-            pullRequestPromise={pullRequestPromise}
-            teamSlugOrId={selectedTeam.id}
-            githubOwner={githubOwner}
-            repo={repo}
-            pullNumber={pullNumber}
-          />
-        </Suspense>
+    return (
+      <div className="min-h-dvh bg-neutral-50 text-neutral-900">
+        <div className="flex w-full flex-col gap-8 px-6 pb-16 pt-10 sm:px-8 lg:px-12">
+          <Suspense fallback={<PullRequestHeaderSkeleton />}>
+            <PullRequestHeader
+              promise={pullRequestPromise}
+              githubOwner={githubOwner}
+              repo={repo}
+            />
+          </Suspense>
+
+          <Suspense fallback={<DiffViewerSkeleton />}>
+            <PullRequestDiffSection
+              filesPromise={pullRequestFilesPromise}
+              pullRequestPromise={pullRequestPromise}
+              teamSlugOrId={selectedTeam.id}
+              githubOwner={githubOwner}
+              repo={repo}
+              pullNumber={pullNumber}
+            />
+          </Suspense>
+        </div>
       </div>
-    </div>
-  );
+    );
+  } catch (error) {
+    // If we get a 404, show the private repo prompt
+    if (isGithubApiError(error) && error.status === 404) {
+      return (
+        <PrivateRepoPrompt
+          teamSlugOrId={selectedTeam.id}
+          repo={repo}
+          githubOwner={githubOwner}
+        />
+      );
+    }
+
+    // For other errors, throw to be handled by Next.js error boundary
+    throw error;
+  }
 }
 
 type PullRequestPromise = ReturnType<typeof fetchPullRequest>;

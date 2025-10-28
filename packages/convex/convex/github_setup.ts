@@ -215,6 +215,18 @@ export const githubSetup = httpAction(async (ctx, req) => {
     teamId: payload.teamId,
   });
   const teamPath = team?.slug ?? payload.teamId;
-  // Prefer deep link back into the app so Electron foregrounds and refreshes.
-  return Response.redirect(toCmuxDeepLink(teamPath), 302);
+
+  // Check if this is a web request or Electron app request
+  // For web requests, redirect to a web completion page
+  // For Electron, use the deep link
+  const userAgent = req.headers.get("user-agent") || "";
+  const isElectron = userAgent.toLowerCase().includes("electron");
+
+  if (isElectron) {
+    // Prefer deep link back into the app so Electron foregrounds and refreshes.
+    return Response.redirect(toCmuxDeepLink(teamPath), 302);
+  } else {
+    // For web users, redirect to a completion page
+    return Response.redirect(`${base}/github-install-complete`, 302);
+  }
 });
