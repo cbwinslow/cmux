@@ -88,6 +88,7 @@ export const githubSetup = httpAction(async (ctx, req) => {
     iat: number;
     exp: number;
     nonce: string;
+    returnUrl?: string;
   };
   let payload: Payload;
   try {
@@ -210,23 +211,17 @@ export const githubSetup = httpAction(async (ctx, req) => {
     }
   }
 
-  // Resolve slug for nicer redirect when available
+  // Check if there's a returnUrl in the payload (web flow)
+  if (payload.returnUrl) {
+    console.log("[github_setup] Redirecting to web return URL:", payload.returnUrl);
+    return Response.redirect(payload.returnUrl, 302);
+  }
+
+  // Otherwise, use Electron deep link (Electron flow)
   const team = await ctx.runQuery(internal.teams.getByTeamIdInternal, {
     teamId: payload.teamId,
   });
   const teamPath = team?.slug ?? payload.teamId;
-
-  // Check if this is a web request or Electron app request
-  // For web requests, redirect to a web completion page
-  // For Electron, use the deep link
-  const userAgent = req.headers.get("user-agent") || "";
-  const isElectron = userAgent.toLowerCase().includes("electron");
-
-  if (isElectron) {
-    // Prefer deep link back into the app so Electron foregrounds and refreshes.
-    return Response.redirect(toCmuxDeepLink(teamPath), 302);
-  } else {
-    // For web users, redirect to a completion page
-    return Response.redirect(`${base}/github-install-complete`, 302);
-  }
+  console.log("[github_setup] No return URL, using deep link for team:", teamPath);
+  return Response.redirect(toCmuxDeepLink(teamPath), 302);
 });

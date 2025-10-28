@@ -2,62 +2,81 @@
 
 import { useState } from "react";
 import { AlertCircle, Github } from "lucide-react";
-import { env } from "@/lib/utils/www-env";
 
 interface PrivateRepoPromptProps {
   teamSlugOrId: string;
   repo: string;
   githubOwner: string;
+  githubAppSlug?: string;
 }
 
 export function PrivateRepoPrompt({
   teamSlugOrId,
   repo,
   githubOwner,
+  githubAppSlug: githubAppSlugProp,
 }: PrivateRepoPromptProps) {
   const [isRedirecting, setIsRedirecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleInstallApp = async () => {
     setIsRedirecting(true);
+    setError(null);
 
     try {
-      // Generate install state token from API
-      const response = await fetch("/api/integrations/github/install-state", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ teamSlugOrId }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to generate install state");
-      }
-
-      const { state } = await response.json();
-      const currentUrl = window.location.href;
-
-      // Build GitHub App installation URL
-      const githubAppSlug = env.NEXT_PUBLIC_GITHUB_APP_SLUG;
+      // Check if GitHub App slug is configured
+      // Use prop if available, otherwise try to get from client-side env
+      const githubAppSlug = githubAppSlugProp || process.env.NEXT_PUBLIC_GITHUB_APP_SLUG;
       if (!githubAppSlug) {
-        console.error("GitHub App slug not configured");
+        setError("GitHub App is not configured. Please contact support.");
         setIsRedirecting(false);
         return;
       }
+
+      // Generate install state token from API with return URL
+      const currentUrl = window.location.href;
+      console.log("[PrivateRepoPrompt] Starting installation flow with return URL:", currentUrl);
+
+      const response = await fetch("/api/integrations/github/install-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          teamSlugOrId,
+          returnUrl: currentUrl,
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        if (response.status === 403) {
+          setError("You don't have permission to install the app for this team.");
+        } else if (response.status === 401) {
+          setError("You need to sign in first. Redirecting...");
+          // Redirect to sign in with return path
+          setTimeout(() => {
+            const returnTo = encodeURIComponent(window.location.pathname);
+            window.location.href = `/sign-in?after_auth_return_to=${returnTo}`;
+          }, 2000);
+        } else {
+          setError(`Failed to start installation: ${text}`);
+        }
+        setIsRedirecting(false);
+        return;
+      }
+
+      const { state } = await response.json();
 
       const installUrl = new URL(
         `https://github.com/apps/${githubAppSlug}/installations/new`
       );
       installUrl.searchParams.set("state", state);
 
-      // Store the current URL so we can redirect back after installation
-      // The github_setup callback will check this and redirect appropriately
-      if (typeof window !== "undefined" && window.sessionStorage) {
-        window.sessionStorage.setItem("pr_review_return_url", currentUrl);
-      }
-
       // Redirect to GitHub App installation
+      // The return URL is now encoded in the state token
       window.location.href = installUrl.toString();
-    } catch (error) {
-      console.error("Failed to initiate GitHub App installation:", error);
+    } catch (err) {
+      console.error("Failed to initiate GitHub App installation:", err);
+      setError("An unexpected error occurred. Please try again.");
       setIsRedirecting(false);
     }
   };
@@ -116,6 +135,12 @@ export function PrivateRepoPrompt({
                     </li>
                   </ol>
                 </div>
+
+                {error && (
+                  <div className="rounded-lg bg-red-50 border border-red-200 p-4">
+                    <p className="text-sm text-red-800">{error}</p>
+                  </div>
+                )}
 
                 <button
                   onClick={handleInstallApp}

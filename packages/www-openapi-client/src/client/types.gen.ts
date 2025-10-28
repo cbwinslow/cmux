@@ -332,6 +332,10 @@ export type GithubInstallStateRequest = {
      * Team slug or UUID
      */
     teamSlugOrId: string;
+    /**
+     * Optional URL to redirect back to after installation (for web flows)
+     */
+    returnUrl?: string;
 };
 
 export type SetupInstanceResponse = {

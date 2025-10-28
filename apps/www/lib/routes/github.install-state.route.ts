@@ -8,6 +8,9 @@ export const githubInstallStateRouter = new OpenAPIHono();
 const RequestBody = z
   .object({
     teamSlugOrId: z.string().min(1).openapi({ description: "Team slug or UUID" }),
+    returnUrl: z.string().url().optional().openapi({
+      description: "Optional URL to redirect back to after installation (for web flows)"
+    }),
   })
   .openapi("GithubInstallStateRequest");
 
@@ -51,12 +54,13 @@ githubInstallStateRouter.openapi(
     const accessToken = await getAccessTokenFromRequest(c.req.raw);
     if (!accessToken) return c.text("Unauthorized", 401);
 
-    const { teamSlugOrId } = c.req.valid("json");
+    const { teamSlugOrId, returnUrl } = c.req.valid("json");
 
     try {
       const convex = getConvex({ accessToken });
       const result = await convex.mutation(api.github_app.mintInstallState, {
         teamSlugOrId,
+        ...(returnUrl ? { returnUrl } : {}),
       });
 
       return c.json({ state: result.state });

@@ -621,6 +621,8 @@ const convexSchema = defineSchema({
       v.literal("used"),
       v.literal("expired")
     ),
+    // Optional return URL for redirecting back after installation (for web flows)
+    returnUrl: v.optional(v.string()),
     createdAt: v.number(),
   }).index("by_nonce", ["nonce"]),
 

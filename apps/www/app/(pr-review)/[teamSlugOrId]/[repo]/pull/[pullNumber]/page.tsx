@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { waitUntil } from "@vercel/functions";
 import { type Team } from "@stackframe/stack";
+import { env } from "@/lib/utils/www-env";
 
 import {
   fetchPullRequest,
@@ -27,6 +28,7 @@ import {
   summarizeFiles,
 } from "../../_components/review-diff-content";
 import { PrivateRepoPrompt } from "../../_components/private-repo-prompt";
+import { TeamOnboardingPrompt } from "../../_components/team-onboarding-prompt";
 
 type PageParams = {
   teamSlugOrId: string;
@@ -49,11 +51,23 @@ function redirectToSignIn(returnPath: string): never {
   const searchParams = new URLSearchParams({ after_auth_return_to: normalizedPath });
   const signInUrl = `${stackServerApp.urls.signIn}?${searchParams.toString()}`;
 
+  console.log("[PR Review] Redirecting to sign in:", {
+    returnPath,
+    normalizedPath,
+    signInUrl,
+  });
+
   redirect(signInUrl);
 }
 
 async function requireSignedInUser(returnPath: string) {
   const user = await stackServerApp.getUser({ or: "return-null" });
+
+  console.log("[PR Review] Auth check:", {
+    returnPath,
+    hasUser: !!user,
+    userId: user?.id,
+  });
 
   if (!user) {
     redirectToSignIn(returnPath);
@@ -115,15 +129,23 @@ export default async function PullRequestPage({ params }: PageProps) {
   const returnPath = buildPullRequestPath(resolvedParams);
   const user = await requireSignedInUser(returnPath);
   const selectedTeam = user.selectedTeam || (await getFirstTeam());
-  if (!selectedTeam) {
-    throw notFound();
-  }
 
   const { teamSlugOrId: githubOwner, repo, pullNumber: pullNumberRaw } = resolvedParams;
   const pullNumber = parsePullNumber(pullNumberRaw);
 
   if (pullNumber === null) {
     notFound();
+  }
+
+  // If user doesn't have a team, show onboarding
+  if (!selectedTeam) {
+    return (
+      <TeamOnboardingPrompt
+        githubOwner={githubOwner}
+        repo={repo}
+        pullNumber={pullNumber}
+      />
+    );
   }
 
   // Check if the PR is accessible
@@ -178,6 +200,7 @@ export default async function PullRequestPage({ params }: PageProps) {
           teamSlugOrId={selectedTeam.id}
           repo={repo}
           githubOwner={githubOwner}
+          githubAppSlug={env.NEXT_PUBLIC_GITHUB_APP_SLUG}
         />
       );
     }

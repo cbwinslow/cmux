@@ -1,16 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 
 export default function GitHubInstallCompletePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isRedirecting, setIsRedirecting] = useState(true);
+  const [returnPath, setReturnPath] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check if there's a stored return URL
+    console.log("[GitHub Install Complete] Checking for return URL...");
+
+    // Priority 1: Check if there's a stored return URL from PR review
     const returnUrl = sessionStorage.getItem("pr_review_return_url");
+    console.log("[GitHub Install Complete] Found return URL:", returnUrl);
 
     if (returnUrl) {
       // Clear the stored URL
@@ -20,21 +25,39 @@ export default function GitHubInstallCompletePage() {
       try {
         const url = new URL(returnUrl);
         const path = url.pathname + url.search + url.hash;
+        console.log("[GitHub Install Complete] Redirecting to:", path);
+        setReturnPath(path);
 
         // Wait a moment before redirecting to show the success message
         setTimeout(() => {
           router.push(path);
         }, 1500);
         return;
-      } catch {
-        // If URL parsing fails, show manual message
-        setIsRedirecting(false);
+      } catch (error) {
+        console.error("Failed to parse return URL:", error);
       }
-    } else {
-      // No return URL, show manual message
-      setIsRedirecting(false);
     }
-  }, [router]);
+
+    // Priority 2: Try Electron deep link (for Electron app users)
+    const team = searchParams.get("team");
+    if (team) {
+      try {
+        const deepLink = `cmux://github-connect-complete?team=${encodeURIComponent(team)}`;
+        window.location.href = deepLink;
+
+        // Wait a moment, then show manual message if deep link didn't work
+        setTimeout(() => {
+          setIsRedirecting(false);
+        }, 2000);
+        return;
+      } catch (error) {
+        console.error("Failed to open deep link:", error);
+      }
+    }
+
+    // No return URL or team, show manual message
+    setIsRedirecting(false);
+  }, [router, searchParams]);
 
   if (isRedirecting) {
     return (
@@ -49,7 +72,9 @@ export default function GitHubInstallCompletePage() {
             Installation Complete
           </h1>
           <p className="mt-2 text-sm text-neutral-600">
-            Redirecting you back to the pull request...
+            {returnPath
+              ? "Redirecting you back to the pull request..."
+              : "Opening cmux app..."}
           </p>
         </div>
       </div>
@@ -80,12 +105,19 @@ export default function GitHubInstallCompletePage() {
                   <span className="font-semibold">Next steps:</span>
                 </p>
                 <ol className="mt-2 space-y-1 text-sm text-neutral-600">
-                  <li>1. Close this tab or window</li>
-                  <li>2. Return to the pull request page</li>
-                  <li>3. Refresh the page if needed</li>
+                  <li>1. Use your browser's back button to return to the pull request page</li>
+                  <li>2. Or close this tab and navigate back to the PR you were viewing</li>
+                  <li>3. Refresh the page to reload with your new permissions</li>
                   <li>4. You should now be able to view the pull request</li>
                 </ol>
               </div>
+
+              <button
+                onClick={() => window.history.back()}
+                className="mt-4 w-full inline-flex items-center justify-center gap-3 rounded-lg bg-neutral-900 px-6 py-3 text-base font-medium text-white transition-colors hover:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-neutral-400 focus:ring-offset-2"
+              >
+                Go Back
+              </button>
             </div>
           </div>
         </div>
