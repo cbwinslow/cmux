@@ -114,6 +114,7 @@ export interface PrReviewJobContext {
   showContextLineNumbers?: boolean;
   strategy?: string;
   diffArtifactMode?: string;
+  githubAccessToken?: string;
 }
 
 export interface ComparisonReviewContext {

@@ -49,6 +49,17 @@ export interface HeatmapJobResult {
   failures: Array<{ filePath: string; message: string }>;
 }
 
+const DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com";
+const GITHUB_USER_AGENT = "cmux-pr-review-heatmap";
+
+interface CollectPrDiffsOptions {
+  prIdentifier: string;
+  includePaths?: string[];
+  maxFiles?: number | null;
+  githubToken?: string | null;
+  githubApiBaseUrl?: string;
+}
+
 class HeatmapProcessingError extends Error {
   filePath: string;
 
@@ -267,6 +278,9 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+// Export helper functions and core functions for external use
+export { formatDuration, isBinaryFile, mapWithConcurrency };
+
 export async function runHeatmapJob(
   options: HeatmapJobOptions
 ): Promise<HeatmapJobResult> {
@@ -378,6 +392,10 @@ interface CliOptions {
   includePaths: string[];
   useMergeBase: boolean;
   prIdentifier: string | null;
+  githubToken: string | null;
+  githubApiBaseUrl: string | null;
+  preferGhCli: boolean;
+  allowGhCliFallback: boolean;
 }
 
 function parseCliArgs(argv: readonly string[]): CliOptions {
@@ -391,6 +409,10 @@ function parseCliArgs(argv: readonly string[]): CliOptions {
     includePaths: [],
     useMergeBase: true,
     prIdentifier: null,
+    githubToken: null,
+    githubApiBaseUrl: null,
+    preferGhCli: false,
+    allowGhCliFallback: true,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -478,6 +500,41 @@ function parseCliArgs(argv: readonly string[]): CliOptions {
       options.maxFiles = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
       continue;
     }
+    if (arg === "--github-token") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new Error("--github-token flag requires a value");
+      }
+      options.githubToken = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--github-token=")) {
+      options.githubToken = arg.slice("--github-token=".length);
+      continue;
+    }
+    if (arg === "--github-api-base-url") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new Error("--github-api-base-url flag requires a value");
+      }
+      options.githubApiBaseUrl = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--github-api-base-url=")) {
+      options.githubApiBaseUrl = arg.slice("--github-api-base-url=".length);
+      continue;
+    }
+    if (arg === "--use-gh-cli") {
+      options.preferGhCli = true;
+      options.allowGhCliFallback = true;
+      continue;
+    }
+    if (arg === "--no-gh-cli") {
+      options.allowGhCliFallback = false;
+      continue;
+    }
     if (arg === "--no-merge-base") {
       options.useMergeBase = false;
       continue;
@@ -520,7 +577,11 @@ Options:
   --output <dir>        Directory for JSON artifacts (default tmp/pr-review-heatmap)
   --concurrency <n>     Max concurrent AI calls (default 50)
   --max-files <n>       Limit number of files processed
-  --pr <url|id>         Pull request to analyze via gh CLI (skips local git diff)
+  --github-token <tok>  GitHub token for API requests (defaults to env vars)
+  --github-api-base-url <url>  Override GitHub API base URL
+  --use-gh-cli          Force using GitHub CLI for PR metadata & diffs
+  --no-gh-cli           Disable GitHub CLI fallback even without a token
+  --pr <url|id>         Pull request to analyze (uses GitHub API by default)
   --no-merge-base       Use two-dot diff instead of merge-base three-dot
   --help                Show this help message
 
@@ -588,6 +649,80 @@ async function collectLocalDiffs(
   return results;
 }
 
+interface GhPrMetadata {
+  owner: string;
+  repo: string;
+  number: number;
+  prUrl: string;
+  baseRefName: string;
+  baseRefOid: string | null;
+  headRefName: string;
+  headRefOid: string | null;
+  title: string | null;
+}
+
+function resolveGithubToken(token?: string | null): string | null {
+  const envToken =
+    process.env.GITHUB_TOKEN ??
+    process.env.GH_TOKEN ??
+    process.env.GITHUB_PERSONAL_ACCESS_TOKEN ??
+    null;
+  return token ?? envToken;
+}
+
+function normalizeGithubApiBaseUrl(custom?: string): string {
+  const base = (custom ?? DEFAULT_GITHUB_API_BASE_URL).trim();
+  return base.endsWith("/") ? base : `${base}/`;
+}
+
+function buildGithubApiUrl(baseUrl: string, path: string): string {
+  const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
+  return `${baseUrl}${normalizedPath}`;
+}
+
+function buildGithubHeaders(
+  token: string | null,
+  accept: string
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: accept,
+    "User-Agent": GITHUB_USER_AGENT,
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+async function fetchGithubResponse(
+  path: string,
+  {
+    token,
+    baseUrl,
+    accept,
+    responseType,
+  }: {
+    token: string | null;
+    baseUrl: string;
+    accept: string;
+    responseType: "json" | "text";
+  }
+): Promise<unknown> {
+  const url = buildGithubApiUrl(baseUrl, path);
+  const response = await fetch(url, {
+    headers: buildGithubHeaders(token, accept),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `GitHub API request to ${url} failed with status ${
+        response.status
+      }: ${errorText.slice(0, 2000)}`
+    );
+  }
+  return responseType === "json" ? response.json() : response.text();
+}
+
 interface ParsedPrIdentifier {
   owner: string;
   repo: string;
@@ -622,13 +757,191 @@ function tryParseGithubPrUrl(value: string): ParsedPrIdentifier | null {
   }
 }
 
-interface PrSelection {
+function parseGithubPrIdentifier(value: string): ParsedPrIdentifier {
+  const fromUrl = tryParseGithubPrUrl(value);
+  if (fromUrl) {
+    return fromUrl;
+  }
+  const hashMatch = value.match(/^([^#]+)#(\d+)$/);
+  if (hashMatch) {
+    const repoParts = hashMatch[1].split("/");
+    if (repoParts.length === 2) {
+      const number = Number(hashMatch[2]);
+      if (Number.isInteger(number)) {
+        return {
+          owner: repoParts[0],
+          repo: repoParts[1],
+          number,
+        };
+      }
+    }
+  }
+  throw new Error(
+    `PR identifier must be a GitHub URL or <owner>/<repo>#<number>, received: ${value}`
+  );
+}
+
+interface GithubApiContext {
+  token: string | null;
+  baseUrl: string;
+}
+
+async function fetchPrMetadataFromGithub(
+  identifier: ParsedPrIdentifier,
+  context: GithubApiContext
+): Promise<GhPrMetadata> {
+  const path = `repos/${identifier.owner}/${identifier.repo}/pulls/${identifier.number}`;
+  const data = (await fetchGithubResponse(path, {
+    token: context.token,
+    baseUrl: context.baseUrl,
+    accept: "application/vnd.github+json",
+    responseType: "json",
+  })) as Record<string, unknown>;
+
+  const base = (data.base as Record<string, unknown> | undefined) ?? undefined;
+  const head = (data.head as Record<string, unknown> | undefined) ?? undefined;
+
+  const prUrl =
+    (typeof data.html_url === "string" && data.html_url.length > 0
+      ? data.html_url
+      : undefined) ??
+    `https://github.com/${identifier.owner}/${identifier.repo}/pull/${identifier.number}`;
+
+  const baseRefName =
+    typeof base?.ref === "string" && base.ref.length > 0
+      ? base.ref
+      : "unknown";
+  const baseRefOid =
+    typeof base?.sha === "string" && base.sha.length > 0 ? base.sha : null;
+  const headRefName =
+    typeof head?.ref === "string" && head.ref.length > 0
+      ? head.ref
+      : "unknown";
+  const headRefOid =
+    typeof head?.sha === "string" && head.sha.length > 0 ? head.sha : null;
+
+  const title =
+    typeof data.title === "string" && data.title.length > 0 ? data.title : null;
+
+  return {
+    owner: identifier.owner,
+    repo: identifier.repo,
+    number: identifier.number,
+    prUrl,
+    baseRefName,
+    baseRefOid,
+    headRefName,
+    headRefOid,
+    title,
+  };
+}
+
+function splitDiffIntoFiles(diffText: string): FileDiff[] {
+  const lines = diffText.split("\n");
+  const results: FileDiff[] = [];
+  let currentFilePath: string | null = null;
+  let currentBuffer: string[] = [];
+  let skippedBinary = 0;
+
+  const flushCurrent = (): void => {
+    if (currentFilePath && currentBuffer.length > 0) {
+      const content = currentBuffer.join("\n").trimEnd();
+      if (content.length > 0) {
+        if (isBinaryFile(currentFilePath, content)) {
+          skippedBinary += 1;
+          console.log(`[heatmap] Skipping binary file: ${currentFilePath}`);
+        } else {
+          results.push({ filePath: currentFilePath, diffText: content });
+        }
+      }
+    }
+    currentBuffer = [];
+  };
+
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      flushCurrent();
+      const match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+      currentFilePath =
+        match && typeof match[2] === "string"
+          ? match[2]
+          : `unknown_${results.length}`;
+      currentBuffer = [line];
+      continue;
+    }
+    if (currentBuffer.length === 0) {
+      continue;
+    }
+    currentBuffer.push(line);
+  }
+  flushCurrent();
+
+  if (skippedBinary > 0) {
+    console.log(`[heatmap] Skipped ${skippedBinary} binary file(s) from PR`);
+  }
+
+  return results;
+}
+
+async function fetchPrDiffFromGithub(
+  identifier: ParsedPrIdentifier,
+  context: GithubApiContext
+): Promise<FileDiff[]> {
+  const path = `repos/${identifier.owner}/${identifier.repo}/pulls/${identifier.number}`;
+  const diffText = (await fetchGithubResponse(path, {
+    token: context.token,
+    baseUrl: context.baseUrl,
+    accept: "application/vnd.github.v3.diff",
+    responseType: "text",
+  })) as string;
+  return splitDiffIntoFiles(diffText);
+}
+
+function filterFileDiffsByInclude(
+  fileDiffs: FileDiff[],
+  includePaths: string[]
+): FileDiff[] {
+  if (includePaths.length === 0) {
+    return fileDiffs;
+  }
+  const includeSet = new Set(includePaths);
+  return fileDiffs.filter((file) => includeSet.has(file.filePath));
+}
+
+export async function collectPrDiffs({
+  prIdentifier,
+  includePaths = [],
+  maxFiles = null,
+  githubToken,
+  githubApiBaseUrl,
+}: CollectPrDiffsOptions): Promise<{
+  metadata: GhPrMetadata;
+  fileDiffs: FileDiff[];
+}> {
+  const identifier = parseGithubPrIdentifier(prIdentifier);
+  const token = resolveGithubToken(githubToken ?? null);
+  const baseUrl = normalizeGithubApiBaseUrl(githubApiBaseUrl);
+  const context: GithubApiContext = { token, baseUrl };
+  const metadata = await fetchPrMetadataFromGithub(identifier, context);
+  const allDiffs = await fetchPrDiffFromGithub(identifier, context);
+  let filtered = filterFileDiffsByInclude(allDiffs, includePaths ?? []);
+  if (filtered.length === 0) {
+    filtered = allDiffs;
+  }
+  const limited =
+    typeof maxFiles === "number" && maxFiles > 0
+      ? filtered.slice(0, maxFiles)
+      : filtered;
+  return { metadata, fileDiffs: limited };
+}
+
+interface GhCliSelection {
   argument: string;
   repo?: string;
   prUrlHint?: string;
 }
 
-function resolvePrSelection(input: string): PrSelection {
+function resolveGhCliSelection(input: string): GhCliSelection {
   const parsedFromUrl = tryParseGithubPrUrl(input);
   if (parsedFromUrl) {
     return {
@@ -656,20 +969,8 @@ async function runGhCommand(args: string[]): Promise<string> {
   return stdout;
 }
 
-interface GhPrMetadata {
-  owner: string;
-  repo: string;
-  number: number;
-  prUrl: string;
-  baseRefName: string;
-  baseRefOid: string | null;
-  headRefName: string;
-  headRefOid: string | null;
-  title: string | null;
-}
-
-async function fetchPrMetadataViaGh(
-  selection: PrSelection
+async function fetchPrMetadataViaGhCli(
+  selection: GhCliSelection
 ): Promise<GhPrMetadata> {
   const fields = [
     "url",
@@ -724,54 +1025,7 @@ async function fetchPrMetadataViaGh(
   };
 }
 
-function splitDiffIntoFiles(diffText: string): FileDiff[] {
-  const lines = diffText.split("\n");
-  const results: FileDiff[] = [];
-  let currentFilePath: string | null = null;
-  let currentBuffer: string[] = [];
-  let skippedBinary = 0;
-
-  const flushCurrent = (): void => {
-    if (currentFilePath && currentBuffer.length > 0) {
-      const content = currentBuffer.join("\n").trimEnd();
-      if (content.length > 0) {
-        if (isBinaryFile(currentFilePath, content)) {
-          skippedBinary += 1;
-          console.log(`[heatmap] Skipping binary file: ${currentFilePath}`);
-        } else {
-          results.push({ filePath: currentFilePath, diffText: content });
-        }
-      }
-    }
-    currentBuffer = [];
-  };
-
-  for (const line of lines) {
-    if (line.startsWith("diff --git ")) {
-      flushCurrent();
-      const match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
-      currentFilePath =
-        match && typeof match[2] === "string"
-          ? match[2]
-          : `unknown_${results.length}`;
-      currentBuffer = [line];
-      continue;
-    }
-    if (currentBuffer.length === 0) {
-      continue;
-    }
-    currentBuffer.push(line);
-  }
-  flushCurrent();
-
-  if (skippedBinary > 0) {
-    console.log(`[heatmap] Skipped ${skippedBinary} binary file(s) from PR`);
-  }
-
-  return results;
-}
-
-async function fetchPrDiffViaGh(metadata: GhPrMetadata): Promise<FileDiff[]> {
+async function fetchPrDiffViaGhCli(metadata: GhPrMetadata): Promise<FileDiff[]> {
   const path = `repos/${metadata.owner}/${metadata.repo}/pulls/${metadata.number}`;
   const diffText = await runGhCommand([
     "api",
@@ -782,18 +1036,7 @@ async function fetchPrDiffViaGh(metadata: GhPrMetadata): Promise<FileDiff[]> {
   return splitDiffIntoFiles(diffText);
 }
 
-function filterFileDiffsByInclude(
-  fileDiffs: FileDiff[],
-  includePaths: string[]
-): FileDiff[] {
-  if (includePaths.length === 0) {
-    return fileDiffs;
-  }
-  const includeSet = new Set(includePaths);
-  return fileDiffs.filter((file) => includeSet.has(file.filePath));
-}
-
-async function collectPrDiffs(
+async function collectPrDiffsViaGhCli(
   prIdentifier: string,
   includePaths: string[],
   maxFiles: number | null
@@ -801,9 +1044,9 @@ async function collectPrDiffs(
   metadata: GhPrMetadata;
   fileDiffs: FileDiff[];
 }> {
-  const selection = resolvePrSelection(prIdentifier);
-  const metadata = await fetchPrMetadataViaGh(selection);
-  const allDiffs = await fetchPrDiffViaGh(metadata);
+  const selection = resolveGhCliSelection(prIdentifier);
+  const metadata = await fetchPrMetadataViaGhCli(selection);
+  const allDiffs = await fetchPrDiffViaGhCli(metadata);
   let filtered = filterFileDiffsByInclude(allDiffs, includePaths);
   if (filtered.length === 0) {
     filtered = allDiffs;
@@ -832,12 +1075,54 @@ async function main(): Promise<void> {
   let prMetadata: GhPrMetadata | null = null;
 
   if (options.prIdentifier) {
-    console.log(`[heatmap] Fetching PR ${options.prIdentifier} via gh CLI...`);
-    const prData = await collectPrDiffs(
-      options.prIdentifier,
-      options.includePaths,
-      options.maxFiles
-    );
+    const resolvedToken = resolveGithubToken(options.githubToken);
+    const shouldUseGhCliImmediately = options.preferGhCli;
+    const allowGhCliFallback = options.allowGhCliFallback;
+
+    let prData:
+      | {
+          metadata: GhPrMetadata;
+          fileDiffs: FileDiff[];
+        }
+      | null = null;
+
+    if (!shouldUseGhCliImmediately) {
+      try {
+        prData = await collectPrDiffs({
+          prIdentifier: options.prIdentifier,
+          includePaths: options.includePaths,
+          maxFiles: options.maxFiles,
+          githubToken: resolvedToken,
+          githubApiBaseUrl: options.githubApiBaseUrl ?? undefined,
+        });
+      } catch (error) {
+        if (!allowGhCliFallback) {
+          throw error;
+        }
+        const message =
+          error instanceof Error ? error.message : String(error ?? "unknown error");
+        console.warn(
+          `[heatmap] GitHub API request failed (${message}); falling back to gh CLI...`
+        );
+      }
+    }
+
+    if (!prData) {
+      if (!allowGhCliFallback) {
+        throw new Error(
+          "Failed to collect PR diffs via GitHub API and gh CLI fallback is disabled."
+        );
+      }
+      console.log(
+        `[heatmap] Fetching PR ${options.prIdentifier} via gh CLI fallback...`
+      );
+      prData = await collectPrDiffsViaGhCli(
+        options.prIdentifier,
+        options.includePaths,
+        options.maxFiles
+      );
+    }
+
     prMetadata = prData.metadata;
     fileDiffs = prData.fileDiffs;
     diffLabel = `${prMetadata.owner}/${prMetadata.repo}#${prMetadata.number} (${prMetadata.baseRefName}...${prMetadata.headRefName})`;
@@ -958,9 +1243,11 @@ async function main(): Promise<void> {
   }
 }
 
-await main().catch((error) => {
-  console.error(
-    error instanceof Error ? (error.stack ?? error.message) : String(error)
-  );
-  process.exit(1);
-});
+if (import.meta.main) {
+  await main().catch((error) => {
+    console.error(
+      error instanceof Error ? (error.stack ?? error.message) : String(error)
+    );
+    process.exit(1);
+  });
+}

@@ -7,7 +7,8 @@ export type PrReviewStrategyId =
   | "inline-phrase"
   | "inline-brackets"
   | "inline-json"
-  | "inline-files";
+  | "inline-files"
+  | "heatmap";
 
 export interface PrReviewOptions {
   strategy: PrReviewStrategyId;
@@ -26,6 +27,7 @@ const STRATEGY_VALUES: PrReviewStrategyId[] = [
   "inline-brackets",
   "inline-json",
   "inline-files",
+  "heatmap",
 ];
 
 export type DiffArtifactMode = "single" | "per-file";

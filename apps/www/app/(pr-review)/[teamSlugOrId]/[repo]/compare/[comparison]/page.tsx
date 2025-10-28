@@ -432,8 +432,25 @@ function scheduleComparisonCodeReviewStart({
           return;
         }
 
-        const { accessToken } = await user.getAuthJson();
+        const [{ accessToken }, githubAccount] = await Promise.all([
+          user.getAuthJson(),
+          user.getConnectedAccount("github"),
+        ]);
         if (!accessToken) {
+          return;
+        }
+        if (!githubAccount) {
+          console.warn(
+            "[code-review] Skipping auto-start: GitHub account not connected"
+          );
+          return;
+        }
+        const { accessToken: githubAccessToken } =
+          await githubAccount.getAccessToken();
+        if (!githubAccessToken) {
+          console.warn(
+            "[code-review] Skipping auto-start: GitHub access token unavailable"
+          );
           return;
         }
 
@@ -454,6 +471,7 @@ function scheduleComparisonCodeReviewStart({
 
         const { backgroundTask } = await startCodeReviewJob({
           accessToken,
+          githubAccessToken,
           callbackBaseUrl,
           payload: {
             teamSlugOrId,
