@@ -1843,10 +1843,23 @@ function FileTreeNavigator({
             )}
             style={{ paddingLeft: depth * 14 + 32 }}
           >
-            {node.isLoading ? (
-              <Loader2 className="h-3.5 w-3.5 text-sky-500 animate-spin flex-shrink-0" />
-            ) : null}
             <span className="truncate">{node.name}</span>
+            {node.isLoading ? (
+              <Tooltip delayDuration={300}>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex items-center ml-auto">
+                    <Loader2 className="h-3.5 w-3.5 text-sky-500 animate-spin flex-shrink-0" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent
+                  side="right"
+                  align="center"
+                  className="rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-xs text-neutral-700 shadow-md dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                >
+                  AI review in progress...
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
           </button>
         );
       })}
@@ -2164,7 +2177,20 @@ function FileDiffCard({
               <span className="pl-1.5 text-sm text-neutral-700 truncate flex items-center gap-2">
                 {file.filename}
                 {isLoading ? (
-                  <Loader2 className="h-3.5 w-3.5 text-sky-500 animate-spin flex-shrink-0" />
+                  <Tooltip delayDuration={300}>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex items-center">
+                        <Loader2 className="h-3.5 w-3.5 text-sky-500 animate-spin flex-shrink-0" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="bottom"
+                      align="start"
+                      className="rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-xs text-neutral-700 shadow-md dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                    >
+                      AI review in progress...
+                    </TooltipContent>
+                  </Tooltip>
                 ) : null}
               </span>
             </div>
