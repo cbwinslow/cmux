@@ -922,397 +922,398 @@ export function CommandBar({ teamSlugOrId }: CommandBarProps) {
   );
 
   const rootCommandEntries = useMemo<CommandListEntry[]>(() => {
-    const entries: CommandListEntry[] = [];
-
-    const pushEntry = (entry: CommandListEntry) => {
-      entries.push(entry);
-    };
-
-    pushEntry({
-      value: "new-task",
-      label: "New Task",
-      keywords: ["task", "create", "new"],
-      searchText: buildSearchText("New Task", ["task", "create"], ["new-task"]),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("new-task"),
-      renderContent: () => (
-        <>
-          <Plus className="h-4 w-4 text-neutral-500" />
-          <span className="text-sm">New Task</span>
-        </>
-      ),
-    });
-
-    pushEntry({
-      value: "local-workspaces",
-      label: "New Local Workspace",
-      keywords: ["workspace", "local", "repo"],
-      searchText: buildSearchText(
-        "New Local Workspace",
-        ["workspace", "local"],
-        ["local-workspaces"]
-      ),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("local-workspaces"),
-      renderContent: () => (
-        <>
-          <FolderPlus className="h-4 w-4 text-neutral-500" />
-          <span className="text-sm">New Local Workspace</span>
-        </>
-      ),
-    });
-
-    pushEntry({
-      value: "pull-requests",
-      label: "Pull Requests",
-      keywords: ["pull request", "prs", "pr"],
-      searchText: buildSearchText(
-        "Pull Requests",
-        ["pull request", "prs"],
-        ["pull-requests"]
-      ),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("pull-requests"),
-      renderContent: () => (
-        <>
-          <GitPullRequest className="h-4 w-4 text-neutral-500" />
-          <span className="text-sm">Pull Requests</span>
-        </>
-      ),
-    });
-
-    if (isDevEnvironment) {
-      pushEntry({
-        value: "dev:webcontents",
-        label: "Debug WebContents",
-        keywords: ["debug", "devtools", "electron"],
-        searchText: buildSearchText(
-          "Debug WebContents",
-          ["debug", "electron"],
-          ["dev:webcontents"]
-        ),
+    const baseEntries: CommandListEntry[] = [
+      {
+        value: "new-task",
+        label: "New Task",
+        keywords: ["task", "create", "new"],
+        searchText: buildSearchText("New Task", ["task", "create"], [
+          "new-task",
+        ]),
         className: baseCommandItemClassName,
-        execute: () => handleSelect("dev:webcontents"),
+        execute: () => handleSelect("new-task"),
         renderContent: () => (
           <>
-            <Bug className="h-4 w-4 text-neutral-500" />
-            <span className="text-sm">Debug WebContents</span>
+            <Plus className="h-4 w-4 text-neutral-500" />
+            <span className="text-sm">New Task</span>
           </>
         ),
-      });
-    }
-
-    pushEntry({
-      value: "home",
-      label: "Home",
-      keywords: ["dashboard", "home"],
-      searchText: buildSearchText("Home", ["dashboard"], ["home"]),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("home"),
-      renderContent: () => (
-        <>
-          <Home className="h-4 w-4 text-neutral-500" />
-          <span className="text-sm">Home</span>
-        </>
-      ),
-    });
-
-    pushEntry({
-      value: "environments",
-      label: "Environments",
-      keywords: ["environment", "env", "servers"],
-      searchText: buildSearchText(
-        "Environments",
-        ["environment"],
-        ["environments"]
-      ),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("environments"),
-      renderContent: () => (
-        <>
-          <Server className="h-4 w-4 text-neutral-500" />
-          <span className="text-sm">Environments</span>
-        </>
-      ),
-    });
-
-    pushEntry({
-      value: "settings",
-      label: "Settings",
-      keywords: ["preferences", "config"],
-      searchText: buildSearchText("Settings", ["preferences"], ["settings"]),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("settings"),
-      renderContent: () => (
-        <>
-          <Settings className="h-4 w-4 text-neutral-500" />
-          <span className="text-sm">Settings</span>
-        </>
-      ),
-    });
-
-    pushEntry({
-      value: "teams:switch",
-      label: "Switch team",
-      keywords: ["team", "switch", "change"],
-      searchText: buildSearchText(
-        "Switch team",
-        ["team", "switch"],
-        ["teams:switch"]
-      ),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("teams:switch"),
-      renderContent: () => (
-        <>
-          <Users className="h-4 w-4 text-neutral-500" />
-          <span className="text-sm">Switch team</span>
-        </>
-      ),
-    });
-
-    pushEntry({
-      value: "sidebar-toggle",
-      label: "Toggle Sidebar",
-      keywords: ["sidebar", "hide", "show", "panel"],
-      searchText: buildSearchText(
-        "Toggle Sidebar",
-        ["sidebar", "toggle"],
-        ["sidebar-toggle"]
-      ),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("sidebar-toggle"),
-      renderContent: () => (
-        <>
-          <PanelLeftClose className="h-4 w-4 text-neutral-500" />
-          <span className="text-sm">Toggle Sidebar</span>
-        </>
-      ),
-    });
-
-    pushEntry({
-      value: "theme-light",
-      label: "Light Mode",
-      keywords: ["theme", "light"],
-      searchText: buildSearchText(
-        "Light Mode",
-        ["theme", "light"],
-        ["theme-light"]
-      ),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("theme-light"),
-      renderContent: () => (
-        <>
-          <Sun className="h-4 w-4 text-amber-500" />
-          <span className="text-sm">Light Mode</span>
-        </>
-      ),
-    });
-
-    pushEntry({
-      value: "theme-dark",
-      label: "Dark Mode",
-      keywords: ["theme", "dark"],
-      searchText: buildSearchText(
-        "Dark Mode",
-        ["theme", "dark"],
-        ["theme-dark"]
-      ),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("theme-dark"),
-      renderContent: () => (
-        <>
-          <Moon className="h-4 w-4 text-blue-500" />
-          <span className="text-sm">Dark Mode</span>
-        </>
-      ),
-    });
-
-    pushEntry({
-      value: "theme-system",
-      label: "System Theme",
-      keywords: ["theme", "system", "auto"],
-      searchText: buildSearchText(
-        "System Theme",
-        ["theme", "system"],
-        ["theme-system"]
-      ),
-      className: baseCommandItemClassName,
-      execute: () => handleSelect("theme-system"),
-      renderContent: () => (
-        <>
-          <Monitor className="h-4 w-4 text-neutral-500" />
-          <span className="text-sm">System Theme</span>
-        </>
-      ),
-    });
-
-    if (stackUser) {
-      pushEntry({
-        value: "sign-out",
-        label: "Sign out",
-        keywords: ["logout", "sign out", "account"],
+      },
+      {
+        value: "local-workspaces",
+        label: "New Local Workspace",
+        keywords: ["workspace", "local", "repo"],
         searchText: buildSearchText(
-          "Sign out",
-          ["logout", "account"],
-          ["sign-out"]
+          "New Local Workspace",
+          ["workspace", "local"],
+          ["local-workspaces"]
         ),
         className: baseCommandItemClassName,
-        execute: () => handleSelect("sign-out"),
+        execute: () => handleSelect("local-workspaces"),
         renderContent: () => (
           <>
-            <LogOut className="h-4 w-4 text-neutral-500" />
-            <span className="text-sm">Sign out</span>
+            <FolderPlus className="h-4 w-4 text-neutral-500" />
+            <span className="text-sm">New Local Workspace</span>
           </>
         ),
-      });
-    }
+      },
+      {
+        value: "pull-requests",
+        label: "Pull Requests",
+        keywords: ["pull request", "prs", "pr"],
+        searchText: buildSearchText(
+          "Pull Requests",
+          ["pull request", "prs"],
+          ["pull-requests"]
+        ),
+        className: baseCommandItemClassName,
+        execute: () => handleSelect("pull-requests"),
+        renderContent: () => (
+          <>
+            <GitPullRequest className="h-4 w-4 text-neutral-500" />
+            <span className="text-sm">Pull Requests</span>
+          </>
+        ),
+      },
+      ...(isDevEnvironment
+        ? [
+            {
+              value: "dev:webcontents",
+              label: "Debug WebContents",
+              keywords: ["debug", "devtools", "electron"],
+              searchText: buildSearchText(
+                "Debug WebContents",
+                ["debug", "electron"],
+                ["dev:webcontents"]
+              ),
+              className: baseCommandItemClassName,
+              execute: () => handleSelect("dev:webcontents"),
+              renderContent: () => (
+                <>
+                  <Bug className="h-4 w-4 text-neutral-500" />
+                  <span className="text-sm">Debug WebContents</span>
+                </>
+              ),
+            },
+          ]
+        : []),
+      {
+        value: "home",
+        label: "Home",
+        keywords: ["dashboard", "home"],
+        searchText: buildSearchText("Home", ["dashboard"], ["home"]),
+        className: baseCommandItemClassName,
+        execute: () => handleSelect("home"),
+        renderContent: () => (
+          <>
+            <Home className="h-4 w-4 text-neutral-500" />
+            <span className="text-sm">Home</span>
+          </>
+        ),
+      },
+      {
+        value: "environments",
+        label: "Environments",
+        keywords: ["environment", "env", "servers"],
+        searchText: buildSearchText(
+          "Environments",
+          ["environment"],
+          ["environments"]
+        ),
+        className: baseCommandItemClassName,
+        execute: () => handleSelect("environments"),
+        renderContent: () => (
+          <>
+            <Server className="h-4 w-4 text-neutral-500" />
+            <span className="text-sm">Environments</span>
+          </>
+        ),
+      },
+      {
+        value: "settings",
+        label: "Settings",
+        keywords: ["preferences", "config"],
+        searchText: buildSearchText(
+          "Settings",
+          ["preferences"],
+          ["settings"]
+        ),
+        className: baseCommandItemClassName,
+        execute: () => handleSelect("settings"),
+        renderContent: () => (
+          <>
+            <Settings className="h-4 w-4 text-neutral-500" />
+            <span className="text-sm">Settings</span>
+          </>
+        ),
+      },
+      {
+        value: "teams:switch",
+        label: "Switch team",
+        keywords: ["team", "switch", "change"],
+        searchText: buildSearchText(
+          "Switch team",
+          ["team", "switch"],
+          ["teams:switch"]
+        ),
+        className: baseCommandItemClassName,
+        execute: () => handleSelect("teams:switch"),
+        renderContent: () => (
+          <>
+            <Users className="h-4 w-4 text-neutral-500" />
+            <span className="text-sm">Switch team</span>
+          </>
+        ),
+      },
+      {
+        value: "sidebar-toggle",
+        label: "Toggle Sidebar",
+        keywords: ["sidebar", "hide", "show", "panel"],
+        searchText: buildSearchText(
+          "Toggle Sidebar",
+          ["sidebar", "toggle"],
+          ["sidebar-toggle"]
+        ),
+        className: baseCommandItemClassName,
+        execute: () => handleSelect("sidebar-toggle"),
+        renderContent: () => (
+          <>
+            <PanelLeftClose className="h-4 w-4 text-neutral-500" />
+            <span className="text-sm">Toggle Sidebar</span>
+          </>
+        ),
+      },
+      {
+        value: "theme-light",
+        label: "Light Mode",
+        keywords: ["theme", "light"],
+        searchText: buildSearchText(
+          "Light Mode",
+          ["theme", "light"],
+          ["theme-light"]
+        ),
+        className: baseCommandItemClassName,
+        execute: () => handleSelect("theme-light"),
+        renderContent: () => (
+          <>
+            <Sun className="h-4 w-4 text-amber-500" />
+            <span className="text-sm">Light Mode</span>
+          </>
+        ),
+      },
+      {
+        value: "theme-dark",
+        label: "Dark Mode",
+        keywords: ["theme", "dark"],
+        searchText: buildSearchText(
+          "Dark Mode",
+          ["theme", "dark"],
+          ["theme-dark"]
+        ),
+        className: baseCommandItemClassName,
+        execute: () => handleSelect("theme-dark"),
+        renderContent: () => (
+          <>
+            <Moon className="h-4 w-4 text-blue-500" />
+            <span className="text-sm">Dark Mode</span>
+          </>
+        ),
+      },
+      {
+        value: "theme-system",
+        label: "System Theme",
+        keywords: ["theme", "system", "auto"],
+        searchText: buildSearchText(
+          "System Theme",
+          ["theme", "system"],
+          ["theme-system"]
+        ),
+        className: baseCommandItemClassName,
+        execute: () => handleSelect("theme-system"),
+        renderContent: () => (
+          <>
+            <Monitor className="h-4 w-4 text-neutral-500" />
+            <span className="text-sm">System Theme</span>
+          </>
+        ),
+      },
+      ...(stackUser
+        ? [
+            {
+              value: "sign-out",
+              label: "Sign out",
+              keywords: ["logout", "sign out", "account"],
+              searchText: buildSearchText(
+                "Sign out",
+                ["logout", "account"],
+                ["sign-out"]
+              ),
+              className: baseCommandItemClassName,
+              execute: () => handleSelect("sign-out"),
+              renderContent: () => (
+                <>
+                  <LogOut className="h-4 w-4 text-neutral-500" />
+                  <span className="text-sm">Sign out</span>
+                </>
+              ),
+            },
+          ]
+        : []),
+    ];
 
-    if (allTasks && allTasks.length > 0) {
-      allTasks.slice(0, 9).forEach((task, index) => {
-        const title = task.pullRequestTitle || task.text || `Task ${index + 1}`;
-        const keywords = compactStrings([
-          title,
-          task.text,
-          task.pullRequestTitle,
-          String(task._id),
-          `task ${index + 1}`,
-        ]);
-        const baseSearch = buildSearchText(title, keywords, [
-          `${index + 1}`,
-          `task:${task._id}`,
-        ]);
-        const statusLabel = task.isCompleted ? "completed" : "in progress";
-        const statusClassName = task.isCompleted
-          ? "text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
-          : "text-xs px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400";
-        const run = task.selectedTaskRun;
+    const taskEntries =
+      allTasks && allTasks.length > 0
+        ? allTasks.slice(0, 9).flatMap<CommandListEntry>((task, index) => {
+            const title =
+              task.pullRequestTitle || task.text || `Task ${index + 1}`;
+            const keywords = compactStrings([
+              title,
+              task.text,
+              task.pullRequestTitle,
+              String(task._id),
+              `task ${index + 1}`,
+            ]);
+            const baseSearch = buildSearchText(title, keywords, [
+              `${index + 1}`,
+              `task:${task._id}`,
+            ]);
+            const statusLabel = task.isCompleted ? "completed" : "in progress";
+            const statusClassName = task.isCompleted
+              ? "text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
+              : "text-xs px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400";
+            const run = task.selectedTaskRun;
 
-        pushEntry({
-          value: `${index + 1}:task:${task._id}`,
-          label: title,
-          keywords,
-          searchText: baseSearch,
-          className: taskCommandItemClassName,
-          execute: () => handleSelect(`task:${task._id}`),
-          renderContent: () => (
-            <>
-              <span className="flex h-5 w-5 items-center justify-center rounded text-xs font-semibold bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 group-data-[selected=true]:bg-neutral-300 dark:group-data-[selected=true]:bg-neutral-600">
-                {index + 1}
-              </span>
-              <span className="flex-1 truncate text-sm">{title}</span>
-              <span className={statusClassName}>{statusLabel}</span>
-            </>
-          ),
-        });
+            const entriesForTask: CommandListEntry[] = [
+              {
+                value: `${index + 1}:task:${task._id}`,
+                label: title,
+                keywords,
+                searchText: baseSearch,
+                className: taskCommandItemClassName,
+                execute: () => handleSelect(`task:${task._id}`),
+                renderContent: () => (
+                  <>
+                    <span className="flex h-5 w-5 items-center justify-center rounded text-xs font-semibold bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 group-data-[selected=true]:bg-neutral-300 dark:group-data-[selected=true]:bg-neutral-600">
+                      {index + 1}
+                    </span>
+                    <span className="flex-1 truncate text-sm">{title}</span>
+                    <span className={statusClassName}>{statusLabel}</span>
+                  </>
+                ),
+              },
+            ];
 
-        if (run) {
-          const vsKeywords = [...keywords, "vs", "vscode"];
-          pushEntry({
-            value: `${index + 1} vs:task:${task._id}`,
-            label: `${title} (VS)`,
-            keywords: vsKeywords,
-            searchText: buildSearchText(`${title} VS`, vsKeywords, [
-              `${index + 1} vs`,
-              `task:${task._id}:vs`,
-            ]),
-            className: taskCommandItemClassName,
-            execute: () => handleSelect(`task:${task._id}:vs`),
+            if (run) {
+              const vsKeywords = [...keywords, "vs", "vscode"];
+              entriesForTask.push({
+                value: `${index + 1} vs:task:${task._id}`,
+                label: `${title} (VS)`,
+                keywords: vsKeywords,
+                searchText: buildSearchText(`${title} VS`, vsKeywords, [
+                  `${index + 1} vs`,
+                  `task:${task._id}:vs`,
+                ]),
+                className: taskCommandItemClassName,
+                execute: () => handleSelect(`task:${task._id}:vs`),
+                renderContent: () => (
+                  <>
+                    <span className="flex h-5 w-8 items-center justify-center rounded text-xs font-semibold bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 group-data-[selected=true]:bg-neutral-300 dark:group-data-[selected=true]:bg-neutral-600">
+                      {index + 1} VS
+                    </span>
+                    <span className="flex-1 truncate text-sm">{title}</span>
+                    <span className={statusClassName}>{statusLabel}</span>
+                  </>
+                ),
+              });
+
+              const diffKeywords = [...keywords, "git", "diff"];
+              entriesForTask.push({
+                value: `${index + 1} git diff:task:${task._id}`,
+                label: `${title} (git diff)`,
+                keywords: diffKeywords,
+                searchText: buildSearchText(
+                  `${title} git diff`,
+                  diffKeywords,
+                  [`${index + 1} git diff`, `task:${task._id}:gitdiff`]
+                ),
+                className: taskCommandItemClassName,
+                execute: () => handleSelect(`task:${task._id}:gitdiff`),
+                renderContent: () => (
+                  <>
+                    <span className="flex h-5 px-2 items-center justify-center rounded text-xs font-semibold bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 group-data-[selected=true]:bg-neutral-300 dark:group-data-[selected=true]:bg-neutral-600">
+                      {index + 1} git diff
+                    </span>
+                    <span className="flex-1 truncate text-sm">{title}</span>
+                    <span className={statusClassName}>{statusLabel}</span>
+                  </>
+                ),
+              });
+            }
+
+            return entriesForTask;
+          })
+        : [];
+
+    const electronEntries = isElectron
+      ? [
+          {
+            value: "updates:check",
+            label: "Check for Updates",
+            keywords: ["update", "version", "desktop"],
+            searchText: buildSearchText(
+              "Check for Updates",
+              ["update", "desktop"],
+              ["updates:check"]
+            ),
+            className: baseCommandItemClassName,
+            execute: () => handleSelect("updates:check"),
             renderContent: () => (
               <>
-                <span className="flex h-5 w-8 items-center justify-center rounded text-xs font-semibold bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 group-data-[selected=true]:bg-neutral-300 dark:group-data-[selected=true]:bg-neutral-600">
-                  {index + 1} VS
-                </span>
-                <span className="flex-1 truncate text-sm">{title}</span>
-                <span className={statusClassName}>{statusLabel}</span>
+                <RefreshCw className="h-4 w-4 text-neutral-500" />
+                <span className="text-sm">Check for Updates</span>
               </>
             ),
-          });
-
-          const diffKeywords = [...keywords, "git", "diff"];
-          pushEntry({
-            value: `${index + 1} git diff:task:${task._id}`,
-            label: `${title} (git diff)`,
-            keywords: diffKeywords,
-            searchText: buildSearchText(`${title} git diff`, diffKeywords, [
-              `${index + 1} git diff`,
-              `task:${task._id}:gitdiff`,
-            ]),
-            className: taskCommandItemClassName,
-            execute: () => handleSelect(`task:${task._id}:gitdiff`),
+          },
+          {
+            value: "logs:view",
+            label: "Logs: View",
+            keywords: ["logs", "view", "desktop"],
+            searchText: buildSearchText(
+              "Logs View",
+              ["logs", "view"],
+              ["logs:view"]
+            ),
+            className: baseCommandItemClassName,
+            execute: () => handleSelect("logs:view"),
             renderContent: () => (
               <>
-                <span className="flex h-5 px-2 items-center justify-center rounded text-xs font-semibold bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 group-data-[selected=true]:bg-neutral-300 dark:group-data-[selected=true]:bg-neutral-600">
-                  {index + 1} git diff
-                </span>
-                <span className="flex-1 truncate text-sm">{title}</span>
-                <span className={statusClassName}>{statusLabel}</span>
+                <ScrollText className="h-4 w-4 text-blue-500" />
+                <span className="text-sm">Logs: View</span>
               </>
             ),
-          });
-        }
-      });
-    }
+          },
+          {
+            value: "logs:copy",
+            label: "Logs: Copy all",
+            keywords: ["logs", "copy"],
+            searchText: buildSearchText(
+              "Logs Copy",
+              ["logs", "copy"],
+              ["logs:copy"]
+            ),
+            className: baseCommandItemClassName,
+            execute: () => handleSelect("logs:copy"),
+            renderContent: () => (
+              <>
+                <ClipboardCopy className="h-4 w-4 text-violet-500" />
+                <span className="text-sm">Logs: Copy all</span>
+              </>
+            ),
+          },
+        ]
+      : [];
 
-    if (isElectron) {
-      pushEntry({
-        value: "updates:check",
-        label: "Check for Updates",
-        keywords: ["update", "version", "desktop"],
-        searchText: buildSearchText(
-          "Check for Updates",
-          ["update", "desktop"],
-          ["updates:check"]
-        ),
-        className: baseCommandItemClassName,
-        execute: () => handleSelect("updates:check"),
-        renderContent: () => (
-          <>
-            <RefreshCw className="h-4 w-4 text-neutral-500" />
-            <span className="text-sm">Check for Updates</span>
-          </>
-        ),
-      });
-
-      pushEntry({
-        value: "logs:view",
-        label: "Logs: View",
-        keywords: ["logs", "view", "desktop"],
-        searchText: buildSearchText(
-          "Logs View",
-          ["logs", "view"],
-          ["logs:view"]
-        ),
-        className: baseCommandItemClassName,
-        execute: () => handleSelect("logs:view"),
-        renderContent: () => (
-          <>
-            <ScrollText className="h-4 w-4 text-blue-500" />
-            <span className="text-sm">Logs: View</span>
-          </>
-        ),
-      });
-
-      pushEntry({
-        value: "logs:copy",
-        label: "Logs: Copy all",
-        keywords: ["logs", "copy"],
-        searchText: buildSearchText(
-          "Logs Copy",
-          ["logs", "copy"],
-          ["logs:copy"]
-        ),
-        className: baseCommandItemClassName,
-        execute: () => handleSelect("logs:copy"),
-        renderContent: () => (
-          <>
-            <ClipboardCopy className="h-4 w-4 text-violet-500" />
-            <span className="text-sm">Logs: Copy all</span>
-          </>
-        ),
-      });
-    }
-
-    return entries;
+    return [...baseEntries, ...taskEntries, ...electronEntries];
   }, [allTasks, handleSelect, stackUser]);
 
   const localWorkspaceEntries = useMemo<CommandListEntry[]>(() => {
