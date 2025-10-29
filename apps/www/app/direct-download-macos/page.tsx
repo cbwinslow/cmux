@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { DirectDownloadRedirector } from "@/app/direct-download-macos/redirector";
@@ -34,6 +34,14 @@ const FALLBACK_RELEASE_INFO: ReleaseInfo = {
 };
 
 export default function DirectDownloadPage() {
+  return (
+    <Suspense fallback={<DirectDownloadFallback />}>
+      <DirectDownloadContent />
+    </Suspense>
+  );
+}
+
+function DirectDownloadContent() {
   const searchParams = useSearchParams();
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
 
@@ -87,15 +95,29 @@ export default function DirectDownloadPage() {
           queryArchitecture={queryArchitecture}
         />
       ) : null}
-      <div className={cardClasses}>
-        <h1 className={headingClasses}>Preparing your download…</h1>
-        <p className={paragraphClasses}>
-          If nothing happens shortly, use the manual download below.
-        </p>
-        <a className={linkClasses} href={initialUrl}>
-          Download manually
-        </a>
-      </div>
+      <DownloadCard initialUrl={initialUrl} />
+    </div>
+  );
+}
+
+function DirectDownloadFallback() {
+  return (
+    <div className={pageContainerClasses}>
+      <DownloadCard initialUrl={FALLBACK_RELEASE_INFO.fallbackUrl} />
+    </div>
+  );
+}
+
+function DownloadCard({ initialUrl }: { initialUrl: string }) {
+  return (
+    <div className={cardClasses}>
+      <h1 className={headingClasses}>Preparing your download…</h1>
+      <p className={paragraphClasses}>
+        If nothing happens shortly, use the manual download below.
+      </p>
+      <a className={linkClasses} href={initialUrl}>
+        Download manually
+      </a>
     </div>
   );
 }
