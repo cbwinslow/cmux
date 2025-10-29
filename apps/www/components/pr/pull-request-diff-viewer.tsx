@@ -18,14 +18,16 @@ import {
   FileMinus,
   FilePlus,
   FileText,
-  Folder,
   Sparkles,
+  Copy,
+  Check,
 } from "lucide-react";
 import {
   Decoration,
   Diff,
   Hunk,
   computeNewLineNumber,
+  computeOldLineNumber,
   parseDiff,
   pickRanges,
   getChangeKey,
@@ -52,11 +54,21 @@ import {
 import { refractor } from "refractor/all";
 
 import {
+  MaterialSymbolsFolderOpenSharp,
+  MaterialSymbolsFolderSharp,
+} from "../icons/material-symbols";
+import {
   buildDiffHeatmap,
   parseReviewHeatmap,
   type DiffHeatmap,
   type ReviewHeatmapLine,
+  type ResolvedHeatmapLine,
 } from "./heatmap";
+import {
+  ReviewCompletionNotificationCard,
+  type ReviewCompletionNotificationCardState,
+} from "./review-completion-notification-card";
+import clsx from "clsx";
 
 type PullRequestDiffViewerProps = {
   files: GithubFileChange[];
@@ -210,7 +222,9 @@ const refractorAdapter = createRefractorAdapter(refractor);
 
 type FileOutput =
   | FunctionReturnType<typeof api.codeReview.listFileOutputsForPr>[number]
-  | FunctionReturnType<typeof api.codeReview.listFileOutputsForComparison>[number];
+  | FunctionReturnType<
+      typeof api.codeReview.listFileOutputsForComparison
+    >[number];
 
 type HeatmapTooltipMeta = {
   score: number;
@@ -222,7 +236,7 @@ type FileDiffViewModel = {
   review: FileOutput | null;
   reviewHeatmap: ReviewHeatmapLine[];
   diffHeatmap: DiffHeatmap | null;
-  changeKeyByLine: Map<number, string>;
+  changeKeyByLine: Map<string, string>;
 };
 
 type ReviewErrorTarget = {
@@ -230,6 +244,7 @@ type ReviewErrorTarget = {
   anchorId: string;
   filePath: string;
   lineNumber: number;
+  side: DiffLineSide;
   reason: string | null;
   score: number | null;
   changeKey: string | null;
@@ -242,6 +257,7 @@ type FocusNavigateOptions = {
 type ActiveTooltipTarget = {
   filePath: string;
   lineNumber: number;
+  side: DiffLineSide;
 };
 
 type ShowAutoTooltipOptions = {
@@ -253,6 +269,20 @@ type HeatmapTooltipTheme = {
   titleClass: string;
   reasonClass: string;
 };
+
+type NavigateOptions = {
+  updateAnchor?: boolean;
+  updateHash?: boolean;
+};
+
+type DiffLineSide = "new" | "old";
+
+type DiffLineLocation = {
+  side: DiffLineSide;
+  lineNumber: number;
+};
+
+type LineTooltipMap = Record<DiffLineSide, Map<number, HeatmapTooltipMeta>>;
 
 function inferLanguage(filename: string): string | null {
   const lowerPath = filename.toLowerCase();
@@ -339,6 +369,41 @@ function getFileStatusMeta(
   }
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy text:", err);
+    }
+  }, [text]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-100"
+      aria-label={copied ? "Copied to clipboard" : "Copy to clipboard"}
+    >
+      {copied ? (
+        <>
+          <Check className="h-3.5 w-3.5" aria-hidden />
+          <span>Copied!</span>
+        </>
+      ) : (
+        <>
+          <Copy className="h-3.5 w-3.5" aria-hidden />
+          <span>Copy</span>
+        </>
+      )}
+    </button>
+  );
+}
+
 export function PullRequestDiffViewer({
   files,
   teamSlugOrId,
@@ -354,7 +419,9 @@ export function PullRequestDiffViewer({
 
   const prQueryArgs = useMemo(
     () =>
-      normalizedJobType !== "pull_request" || prNumber === null || prNumber === undefined
+      normalizedJobType !== "pull_request" ||
+      prNumber === null ||
+      prNumber === undefined
         ? ("skip" as const)
         : {
             teamSlugOrId,
@@ -419,7 +486,39 @@ export function PullRequestDiffViewer({
   }, [fileOutputs]);
 
   const sortedFiles = useMemo(() => {
-    return [...files].sort((a, b) => a.filename.localeCompare(b.filename));
+    // Sort files to match the tree structure order
+    // The tree displays files depth-first, so we need to sort by path segments
+    return [...files].sort((a, b) => {
+      const aSegments = a.filename.split("/");
+      const bSegments = b.filename.split("/");
+      const minLength = Math.min(aSegments.length, bSegments.length);
+
+      // Compare segment by segment
+      for (let i = 0; i < minLength; i++) {
+        const aSegment = aSegments[i]!;
+        const bSegment = bSegments[i]!;
+
+        // At the last segment for one of the paths
+        const aIsLast = i === aSegments.length - 1;
+        const bIsLast = i === bSegments.length - 1;
+
+        if (aSegment === bSegment) {
+          // Same segment, continue to next level
+          continue;
+        }
+
+        // If one is a file and one is a directory at this level, directory comes first
+        if (aIsLast && !bIsLast) return 1; // a is file, b is directory
+        if (!aIsLast && bIsLast) return -1; // a is directory, b is file
+
+        // Both are directories or both are files at this level, sort alphabetically
+        return aSegment.localeCompare(bSegment);
+      }
+
+      // One path is a prefix of the other
+      // Shorter path (file in parent dir) comes before longer path (file in subdir)
+      return aSegments.length - bSegments.length;
+    });
   }, [files]);
 
   const totalFileCount = sortedFiles.length;
@@ -441,20 +540,174 @@ export function PullRequestDiffViewer({
 
   const isLoadingFileOutputs = fileOutputs === undefined;
 
+  const pendingFileCount = useMemo(() => {
+    if (processedFileCount === null) {
+      return Math.max(totalFileCount, 0);
+    }
+    return Math.max(totalFileCount - processedFileCount, 0);
+  }, [processedFileCount, totalFileCount]);
+
+  const [isNotificationSupported, setIsNotificationSupported] = useState(false);
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermission | null>(null);
+  const [shouldNotifyOnCompletion, setShouldNotifyOnCompletion] =
+    useState(false);
+  const [isRequestingNotification, setIsRequestingNotification] =
+    useState(false);
+  const previousPendingCountRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const supported = "Notification" in window;
+    setIsNotificationSupported(supported);
+
+    if (!supported) {
+      return;
+    }
+
+    setNotificationPermission(Notification.permission);
+  }, []);
+
+  useEffect(() => {
+    if (notificationPermission === "denied") {
+      setShouldNotifyOnCompletion(false);
+    }
+  }, [notificationPermission]);
+
+  useEffect(() => {
+    const previousPending = previousPendingCountRef.current;
+    previousPendingCountRef.current = pendingFileCount;
+
+    if (
+      !isNotificationSupported ||
+      notificationPermission !== "granted" ||
+      !shouldNotifyOnCompletion
+    ) {
+      return;
+    }
+
+    if (
+      pendingFileCount === 0 &&
+      (previousPending === null || previousPending > 0)
+    ) {
+      try {
+        const title = "Automated review complete";
+        const body =
+          totalFileCount === 1
+            ? "Finished reviewing the last file."
+            : "Finished reviewing all files in this review.";
+
+        new Notification(title, {
+          body,
+          tag: "cmux-review-complete",
+        });
+      } catch {
+        // Ignore notification errors (for example, blocked constructors)
+      } finally {
+        setShouldNotifyOnCompletion(false);
+      }
+    }
+  }, [
+    isNotificationSupported,
+    notificationPermission,
+    pendingFileCount,
+    shouldNotifyOnCompletion,
+    totalFileCount,
+  ]);
+
+  const handleEnableCompletionNotification = useCallback(async () => {
+    if (!isNotificationSupported) {
+      return;
+    }
+
+    if (notificationPermission === "granted") {
+      setShouldNotifyOnCompletion(true);
+      return;
+    }
+
+    if (notificationPermission === "denied") {
+      return;
+    }
+
+    setIsRequestingNotification(true);
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === "granted") {
+        setShouldNotifyOnCompletion(true);
+      }
+    } catch {
+      // Ignore errors while requesting permission
+    } finally {
+      setIsRequestingNotification(false);
+    }
+  }, [isNotificationSupported, notificationPermission]);
+
+  const hasKnownPendingFiles =
+    processedFileCount !== null && pendingFileCount > 0;
+
+  const handleDisableCompletionNotification = useCallback(() => {
+    setShouldNotifyOnCompletion(false);
+  }, []);
+
+  const notificationCardState =
+    useMemo<ReviewCompletionNotificationCardState | null>(() => {
+      if (
+        !isNotificationSupported ||
+        !hasKnownPendingFiles ||
+        notificationPermission === null
+      ) {
+        return null;
+      }
+
+      if (notificationPermission === "denied") {
+        return { kind: "blocked" };
+      }
+
+      if (shouldNotifyOnCompletion) {
+        return {
+          kind: "enabled",
+          onDisable: handleDisableCompletionNotification,
+        };
+      }
+
+      return {
+        kind: "prompt",
+        isRequesting: isRequestingNotification,
+        onEnable: handleEnableCompletionNotification,
+      };
+    }, [
+      handleDisableCompletionNotification,
+      handleEnableCompletionNotification,
+      hasKnownPendingFiles,
+      isNotificationSupported,
+      isRequestingNotification,
+      notificationPermission,
+      shouldNotifyOnCompletion,
+    ]);
+
   const parsedDiffs = useMemo<ParsedFileDiff[]>(() => {
     return sortedFiles.map((file) => {
       if (!file.patch) {
+        const renameMessage =
+          file.status === "renamed"
+            ? buildRenameMissingDiffMessage(file)
+            : null;
         return {
           file,
           anchorId: file.filename,
           diff: null,
-          error:
-            "GitHub did not return a textual diff for this file. It may be binary or too large.",
+          error: renameMessage ?? undefined,
         };
       }
 
       try {
-        const [diff] = parseDiff(buildDiffText(file));
+        const [diff] = parseDiff(buildDiffText(file), {
+          nearbySequences: "zip",
+        });
         return {
           file,
           anchorId: file.filename,
@@ -501,25 +754,39 @@ export function PullRequestDiffViewer({
 
     for (const fileEntry of fileEntries) {
       const { entry, diffHeatmap, changeKeyByLine } = fileEntry;
-      if (!diffHeatmap || diffHeatmap.entries.size === 0) {
+      if (!diffHeatmap || diffHeatmap.totalEntries === 0) {
         continue;
       }
 
-      const sortedEntries = Array.from(diffHeatmap.entries.entries()).sort(
-        (a, b) => a[0] - b[0]
-      );
+      const addTargets = (
+        entriesMap: Map<number, ResolvedHeatmapLine>,
+        side: DiffLineSide
+      ) => {
+        if (entriesMap.size === 0) {
+          return;
+        }
 
-      for (const [lineNumber, metadata] of sortedEntries) {
-        targets.push({
-          id: `${entry.anchorId}:${lineNumber}`,
-          anchorId: entry.anchorId,
-          filePath: entry.file.filename,
-          lineNumber,
-          reason: metadata.reason ?? null,
-          score: metadata.score ?? null,
-          changeKey: changeKeyByLine.get(lineNumber) ?? null,
-        });
-      }
+        const sortedEntries = Array.from(entriesMap.entries()).sort(
+          (a, b) => a[0] - b[0]
+        );
+
+        for (const [lineNumber, metadata] of sortedEntries) {
+          targets.push({
+            id: `${entry.anchorId}:${side}:${lineNumber}`,
+            anchorId: entry.anchorId,
+            filePath: entry.file.filename,
+            lineNumber,
+            side,
+            reason: metadata.reason ?? null,
+            score: metadata.score ?? null,
+            changeKey:
+              changeKeyByLine.get(buildLineKey(side, lineNumber)) ?? null,
+          });
+        }
+      };
+
+      addTargets(diffHeatmap.entries, "new");
+      addTargets(diffHeatmap.oldEntries, "old");
     }
 
     return targets;
@@ -533,6 +800,7 @@ export function PullRequestDiffViewer({
   const [autoTooltipTarget, setAutoTooltipTarget] =
     useState<ActiveTooltipTarget | null>(null);
   const autoTooltipTimeoutRef = useRef<number | null>(null);
+  const focusChangeOriginRef = useRef<"user" | "auto">("auto");
 
   const clearAutoTooltip = useCallback(() => {
     if (
@@ -559,6 +827,7 @@ export function PullRequestDiffViewer({
       setAutoTooltipTarget({
         filePath: target.filePath,
         lineNumber: target.lineNumber,
+        side: target.side,
       });
 
       const shouldStick = options?.sticky ?? false;
@@ -569,7 +838,8 @@ export function PullRequestDiffViewer({
             if (
               current &&
               current.filePath === target.filePath &&
-              current.lineNumber === target.lineNumber
+              current.lineNumber === target.lineNumber &&
+              current.side === target.side
             ) {
               return null;
             }
@@ -584,16 +854,18 @@ export function PullRequestDiffViewer({
 
   useEffect(() => {
     if (targetCount === 0) {
+      focusChangeOriginRef.current = "auto";
       setFocusedErrorIndex(null);
       return;
     }
 
+    focusChangeOriginRef.current = "auto";
     setFocusedErrorIndex((previous) => {
       if (previous === null) {
-        return 0;
+        return previous;
       }
       if (previous >= targetCount) {
-        return 0;
+        return targetCount - 1;
       }
       return previous;
     });
@@ -687,33 +959,24 @@ export function PullRequestDiffViewer({
 
     const observer = new IntersectionObserver(
       (entries) => {
+        // Find all visible entries and sort by their position from the top
         const visible = entries
           .filter((entry) => entry.isIntersecting)
-          .sort(
-            (a, b) =>
-              a.target.getBoundingClientRect().top -
-              b.target.getBoundingClientRect().top
-          );
-
-        if (visible[0]?.target.id) {
-          setActiveAnchor(visible[0].target.id);
-          return;
-        }
-
-        const nearest = entries
           .map((entry) => ({
             id: entry.target.id,
             top: entry.target.getBoundingClientRect().top,
           }))
-          .sort((a, b) => Math.abs(a.top) - Math.abs(b.top))[0];
+          .sort((a, b) => a.top - b.top);
 
-        if (nearest?.id) {
-          setActiveAnchor(nearest.id);
+        // Set the active anchor to the topmost visible file
+        if (visible.length > 0 && visible[0]?.id) {
+          setActiveAnchor(visible[0].id);
         }
       },
       {
-        rootMargin: "-128px 0px -55% 0px",
-        threshold: [0, 0.2, 0.4, 0.6, 1],
+        // Consider a file active when it's in the top 40% of the viewport
+        rootMargin: "0px 0px -60% 0px",
+        threshold: 0,
       }
     );
 
@@ -729,16 +992,26 @@ export function PullRequestDiffViewer({
     };
   }, [parsedDiffs]);
 
-  const handleNavigate = useCallback((path: string) => {
-    setActivePath(path);
-    setActiveAnchor(path);
+  const handleNavigate = useCallback(
+    (path: string, options?: NavigateOptions) => {
+      setActivePath(path);
 
-    if (typeof window === "undefined") {
-      return;
-    }
+      const shouldUpdateAnchor = options?.updateAnchor ?? true;
+      if (shouldUpdateAnchor) {
+        setActiveAnchor(path);
+      }
 
-    window.location.hash = encodeURIComponent(path);
-  }, []);
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      const shouldUpdateHash = options?.updateHash ?? true;
+      if (shouldUpdateHash) {
+        window.location.hash = encodeURIComponent(path);
+      }
+    },
+    []
+  );
 
   const handleFocusPrevious = useCallback(
     (options?: FocusNavigateOptions) => {
@@ -746,6 +1019,7 @@ export function PullRequestDiffViewer({
         return;
       }
 
+      focusChangeOriginRef.current = "user";
       const isKeyboard = options?.source === "keyboard";
 
       setFocusedErrorIndex((previous) => {
@@ -777,6 +1051,7 @@ export function PullRequestDiffViewer({
         return;
       }
 
+      focusChangeOriginRef.current = "user";
       const isKeyboard = options?.source === "keyboard";
 
       setFocusedErrorIndex((previous) => {
@@ -880,7 +1155,18 @@ export function PullRequestDiffViewer({
       return;
     }
 
-    handleNavigate(focusedError.filePath);
+    const origin = focusChangeOriginRef.current;
+    focusChangeOriginRef.current = "auto";
+    const isUserInitiated = origin === "user";
+
+    handleNavigate(focusedError.filePath, {
+      updateAnchor: isUserInitiated,
+      updateHash: isUserInitiated,
+    });
+
+    if (!isUserInitiated) {
+      return;
+    }
 
     if (focusedError.changeKey) {
       return;
@@ -900,58 +1186,73 @@ export function PullRequestDiffViewer({
 
   if (totalFileCount === 0) {
     return (
-      <div className="rounded-2xl border border-neutral-200 bg-white p-8 text-sm text-neutral-600 shadow-sm">
+      <div className="border border-neutral-200 bg-white p-8 text-sm text-neutral-600">
         This pull request does not introduce any file changes.
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <ReviewProgressIndicator
-        totalFileCount={totalFileCount}
-        processedFileCount={processedFileCount}
-        isLoading={isLoadingFileOutputs}
-      />
-
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
-        <aside className="lg:sticky lg:top-6 lg:h-[calc(100vh-96px)] lg:w-72 lg:overflow-y-auto">
-          {targetCount > 0 ? (
-            <div className="mb-4 flex justify-center">
-              <ErrorNavigator
-                totalCount={targetCount}
-                currentIndex={focusedErrorIndex}
-                onPrevious={handleFocusPrevious}
-                onNext={handleFocusNext}
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-3">
+        <aside className="lg:sticky lg:top-2 lg:h-[calc(100vh)] lg:w-72 lg:overflow-y-auto">
+          <div className="flex flex-col gap-3">
+            <div className="lg:sticky lg:top-0 lg:z-10 lg:bg-white">
+              <ReviewProgressIndicator
+                totalFileCount={totalFileCount}
+                processedFileCount={processedFileCount}
+                isLoading={isLoadingFileOutputs}
               />
             </div>
-          ) : null}
-          <div className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
-            <FileTreeNavigator
-              nodes={fileTree}
-              activePath={activeAnchor}
-              expandedPaths={expandedPaths}
-              onToggleDirectory={handleToggleDirectory}
-              onSelectFile={handleNavigate}
-            />
+            {notificationCardState ? (
+              <ReviewCompletionNotificationCard state={notificationCardState} />
+            ) : null}
+            {targetCount > 0 ? (
+              <div className="flex justify-center">
+                <ErrorNavigator
+                  totalCount={targetCount}
+                  currentIndex={focusedErrorIndex}
+                  onPrevious={handleFocusPrevious}
+                  onNext={handleFocusNext}
+                />
+              </div>
+            ) : null}
+            <div>
+              <FileTreeNavigator
+                nodes={fileTree}
+                activePath={activeAnchor}
+                expandedPaths={expandedPaths}
+                onToggleDirectory={handleToggleDirectory}
+                onSelectFile={handleNavigate}
+              />
+            </div>
           </div>
+          <div className="h-[40px]"></div>
         </aside>
 
-        <div className="flex-1 space-y-6">
+        <div className="flex-1 space-y-3">
           {fileEntries.map(({ entry, review, diffHeatmap }) => {
             const isFocusedFile =
               focusedError?.filePath === entry.file.filename;
-            const focusedLineNumber = isFocusedFile
-              ? (focusedError?.lineNumber ?? null)
+            const focusedLine = isFocusedFile
+              ? focusedError
+                ? {
+                    side: focusedError.side,
+                    lineNumber: focusedError.lineNumber,
+                  }
+                : null
               : null;
             const focusedChangeKey = isFocusedFile
               ? (focusedError?.changeKey ?? null)
               : null;
-            const autoTooltipLineNumber =
+            const autoTooltipLine =
               isFocusedFile &&
               autoTooltipTarget &&
               autoTooltipTarget.filePath === entry.file.filename
-                ? autoTooltipTarget.lineNumber
+                ? {
+                    side: autoTooltipTarget.side,
+                    lineNumber: autoTooltipTarget.lineNumber,
+                  }
                 : null;
 
             return (
@@ -961,12 +1262,13 @@ export function PullRequestDiffViewer({
                 isActive={entry.anchorId === activeAnchor}
                 review={review}
                 diffHeatmap={diffHeatmap}
-                focusedLineNumber={focusedLineNumber}
+                focusedLine={focusedLine}
                 focusedChangeKey={focusedChangeKey}
-                autoTooltipLineNumber={autoTooltipLineNumber}
+                autoTooltipLine={autoTooltipLine}
               />
             );
           })}
+          <div className="h-[70dvh] w-full" />
         </div>
       </div>
     </div>
@@ -996,46 +1298,62 @@ function ReviewProgressIndicator({
       : pendingFileCount === 0
         ? "All files processed"
         : `${processedFileCount} processed • ${pendingFileCount} pending`;
-
   const processedBadgeText =
     processedFileCount === null ? "— done" : `${processedFileCount} done`;
   const pendingBadgeText =
     processedFileCount === null ? "— waiting" : `${pendingFileCount} waiting`;
+  const isFullyProcessed =
+    processedFileCount !== null && pendingFileCount === 0;
+  const shouldPulsePending =
+    processedFileCount === null || pendingFileCount > 0;
 
   return (
     <div
-      className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm transition"
+      className="border border-neutral-200 bg-white p-5 pt-4 transition"
       aria-live="polite"
     >
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-medium text-neutral-700">
             Automated review progress
           </p>
-          <p className="text-xs text-neutral-500">{statusText}</p>
+          <p className="sr-only">{statusText}</p>
         </div>
         <div className="flex items-center gap-2 text-xs font-semibold">
-          <span
-            className={cn(
-              "rounded-md bg-emerald-100 px-2 py-0.5 text-emerald-700",
-              isLoading ? "animate-pulse" : undefined
-            )}
-          >
-            {processedBadgeText}
-          </span>
-          <span
-            className={cn(
-              "rounded-md bg-amber-100 px-2 py-0.5 text-amber-700",
-              isLoading ? "animate-pulse" : undefined
-            )}
-          >
-            {pendingBadgeText}
-          </span>
+          {isFullyProcessed ? (
+            <span
+              className={cn(
+                "bg-emerald-100 px-2 py-0.5 text-emerald-700",
+                isLoading ? "animate-pulse" : undefined
+              )}
+            >
+              All files processed
+            </span>
+          ) : (
+            <>
+              <span
+                className={cn(
+                  "bg-emerald-100 px-2 py-0.5 text-emerald-700",
+                  isLoading ? "animate-pulse" : undefined
+                )}
+              >
+                {processedBadgeText}
+              </span>
+              <span
+                className={cn(
+                  "bg-amber-100 px-2 py-0.5 text-amber-700",
+                  shouldPulsePending ? "animate-pulse" : undefined
+                )}
+              >
+                {pendingBadgeText}
+              </span>
+            </>
+          )}
         </div>
       </div>
-      <div className="mt-3 h-2 rounded-full bg-neutral-200">
+      <div className="mt-3 h-2 bg-neutral-200">
         <div
-          className="h-full rounded-full bg-sky-500 transition-[width] duration-300 ease-out"
+          className="h-full bg-sky-500 transition-[width] duration-300 ease-out"
           style={{ width: `${progressPercent}%` }}
           role="progressbar"
           aria-label="Automated review progress"
@@ -1073,11 +1391,11 @@ function ErrorNavigator({
 
   return (
     <TooltipProvider delayDuration={120} skipDelayDuration={120}>
-      <div className="inline-flex items-center gap-3 rounded-full border border-sky-200 bg-white/95 px-3 py-1 text-xs font-medium text-neutral-700 shadow-sm shadow-sky-200/60 backdrop-blur dark:border-sky-800/60 dark:bg-neutral-900/95 dark:text-neutral-200 dark:shadow-sky-900/40">
+      <div className="flex items-center gap-3 border border-sky-200 bg-white/95 px-3 py-1 text-xs font-medium text-neutral-700 backdrop-blur dark:border-sky-800/60 dark:bg-neutral-900/95 dark:text-neutral-200">
         <span aria-live="polite" className="flex items-center gap-1">
           {hasSelection && displayIndex !== null ? (
             <>
-              <span>Error</span>
+              <span>Highlight</span>
               <span className="font-mono tabular-nums">{displayIndex}</span>
               <span>of</span>
               <span className="font-mono tabular-nums">{totalCount}</span>
@@ -1085,7 +1403,7 @@ function ErrorNavigator({
           ) : (
             <>
               <span className="font-mono tabular-nums">{totalCount}</span>
-              <span>{totalCount === 1 ? "error" : "errors"}</span>
+              <span>{totalCount === 1 ? "highlight" : "highlights"}</span>
             </>
           )}
         </span>
@@ -1095,8 +1413,8 @@ function ErrorNavigator({
               <button
                 type="button"
                 onClick={() => onPrevious()}
-                className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-600 transition hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-500 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                aria-label="Go to previous error (Shift+K)"
+                className="inline-flex h-6 w-6 items-center justify-center border border-neutral-200 bg-white text-neutral-600 transition hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-500 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                aria-label="Go to previous highlight (Shift+K)"
                 disabled={totalCount === 0}
               >
                 <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
@@ -1107,7 +1425,7 @@ function ErrorNavigator({
               align="center"
               className="flex items-center gap-2 rounded-md border border-neutral-200 bg-white px-2 py-1 text-[11px] font-medium text-neutral-700 shadow-md dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
             >
-              <span>Previous error</span>
+              <span>Previous highlight</span>
               <span className="rounded border border-neutral-200 bg-neutral-50 px-1 py-0.5 font-mono text-[10px] uppercase text-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
                 ⇧ K
               </span>
@@ -1118,8 +1436,8 @@ function ErrorNavigator({
               <button
                 type="button"
                 onClick={() => onNext()}
-                className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-600 transition hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-500 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                aria-label="Go to next error (Shift+J)"
+                className="inline-flex h-6 w-6 items-center justify-center border border-neutral-200 bg-white text-neutral-600 transition hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-500 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                aria-label="Go to next highlight (Shift+J)"
                 disabled={totalCount === 0}
               >
                 <ChevronRight className="h-3.5 w-3.5" aria-hidden />
@@ -1130,7 +1448,7 @@ function ErrorNavigator({
               align="center"
               className="flex items-center gap-2 rounded-md border border-neutral-200 bg-white px-2 py-1 text-[11px] font-medium text-neutral-700 shadow-md dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
             >
-              <span>Next error</span>
+              <span>Next highlight</span>
               <span className="rounded border border-neutral-200 bg-neutral-50 px-1 py-0.5 font-mono text-[10px] uppercase text-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
                 ⇧ J
               </span>
@@ -1173,17 +1491,33 @@ function FileTreeNavigator({
                 type="button"
                 onClick={() => onToggleDirectory(node.path)}
                 className={cn(
-                  "flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-left text-sm font-medium transition hover:bg-neutral-100",
+                  "flex w-full items-center gap-1.5 px-2.5 py-1 text-left text-sm transition hover:bg-neutral-100",
                   isExpanded ? "text-neutral-900" : "text-neutral-700"
                 )}
                 style={{ paddingLeft: depth * 14 + 10 }}
               >
                 {isExpanded ? (
-                  <ChevronDown className="h-4 w-4 text-neutral-500" />
+                  <ChevronDown
+                    className="h-4 w-4 text-neutral-500 flex-shrink-0"
+                    style={{ minWidth: "16px", minHeight: "16px" }}
+                  />
                 ) : (
-                  <ChevronRight className="h-4 w-4 text-neutral-500" />
+                  <ChevronRight
+                    className="h-4 w-4 text-neutral-500 flex-shrink-0"
+                    style={{ minWidth: "16px", minHeight: "16px" }}
+                  />
                 )}
-                <Folder className="h-4 w-4 text-neutral-500" />
+                {isExpanded ? (
+                  <MaterialSymbolsFolderOpenSharp
+                    className="h-4 w-4 text-neutral-500 flex-shrink-0 pr-0.5"
+                    style={{ minWidth: "14px", minHeight: "14px" }}
+                  />
+                ) : (
+                  <MaterialSymbolsFolderSharp
+                    className="h-4 w-4 text-neutral-500 flex-shrink-0 pr-0.5"
+                    style={{ minWidth: "14px", minHeight: "14px" }}
+                  />
+                )}
                 <span className="truncate">{node.name}</span>
               </button>
               {isExpanded ? (
@@ -1208,14 +1542,14 @@ function FileTreeNavigator({
             type="button"
             onClick={() => onSelectFile(node.path)}
             className={cn(
-              "flex w-full items-center gap-1 rounded-md px-2.5 py-1 text-left text-sm transition hover:bg-neutral-100",
+              "flex w-full items-center gap-1 px-2.5 py-1 text-left text-sm transition hover:bg-neutral-100",
               isActive
-                ? "bg-sky-100/80 text-sky-900 shadow-sm"
+                ? "bg-sky-100/80 text-sky-900 font-semibold"
                 : "text-neutral-700"
             )}
             style={{ paddingLeft: depth * 14 + 32 }}
           >
-            <span className="truncate font-medium">{node.name}</span>
+            <span className="truncate">{node.name}</span>
           </button>
         );
       })}
@@ -1228,17 +1562,17 @@ function FileDiffCard({
   isActive,
   review,
   diffHeatmap,
-  focusedLineNumber,
+  focusedLine,
   focusedChangeKey,
-  autoTooltipLineNumber,
+  autoTooltipLine,
 }: {
   entry: ParsedFileDiff;
   isActive: boolean;
   review: FileOutput | null;
   diffHeatmap: DiffHeatmap | null;
-  focusedLineNumber: number | null;
+  focusedLine: DiffLineLocation | null;
   focusedChangeKey: string | null;
-  autoTooltipLineNumber: number | null;
+  autoTooltipLine: DiffLineLocation | null;
 }) {
   const { file, diff, anchorId, error } = entry;
   const cardRef = useRef<HTMLElement | null>(null);
@@ -1289,29 +1623,45 @@ function FileDiffCard({
     });
   }, [focusedChangeKey]);
 
-  const lineTooltips = useMemo(() => {
+  const lineTooltips = useMemo<LineTooltipMap | null>(() => {
     if (!diffHeatmap) {
       return null;
     }
 
-    const tooltipMap = new Map<number, HeatmapTooltipMeta>();
-    for (const [lineNumber, metadata] of diffHeatmap.entries.entries()) {
-      const score = metadata.score ?? null;
-      if (score === null || score <= 0) {
-        continue;
-      }
+    const tooltipMap: LineTooltipMap = {
+      new: new Map<number, HeatmapTooltipMeta>(),
+      old: new Map<number, HeatmapTooltipMeta>(),
+    };
 
-      tooltipMap.set(lineNumber, {
-        score,
-        reason: metadata.reason ?? null,
-      });
+    const assignTooltips = (
+      source: Map<number, ResolvedHeatmapLine>,
+      target: Map<number, HeatmapTooltipMeta>
+    ) => {
+      for (const [lineNumber, metadata] of source.entries()) {
+        const score = metadata.score ?? null;
+        if (score === null || score <= 0) {
+          continue;
+        }
+
+        target.set(lineNumber, {
+          score,
+          reason: metadata.reason ?? null,
+        });
+      }
+    };
+
+    assignTooltips(diffHeatmap.entries, tooltipMap.new);
+    assignTooltips(diffHeatmap.oldEntries, tooltipMap.old);
+
+    if (tooltipMap.new.size === 0 && tooltipMap.old.size === 0) {
+      return null;
     }
 
-    return tooltipMap.size > 0 ? tooltipMap : null;
+    return tooltipMap;
   }, [diffHeatmap]);
 
   const renderHeatmapToken = useMemo<RenderToken | undefined>(() => {
-    if (!lineTooltips) {
+    if (!lineTooltips || lineTooltips.new.size === 0) {
       return undefined;
     }
 
@@ -1337,7 +1687,7 @@ function FileDiffCard({
           (className.includes("cmux-heatmap-char") ||
             className.includes("cmux-heatmap-char-tier"))
         ) {
-          const tooltipMeta = lineTooltips.get(lineNumber);
+          const tooltipMeta = lineTooltips.new.get(lineNumber);
           if (tooltipMeta) {
             const rendered = renderDefault(token, index);
             return (
@@ -1384,26 +1734,34 @@ function FileDiffCard({
       wrapInAnchor,
     }) => {
       const content = renderDefault();
-      if (side !== "new") {
+      const tooltipSource =
+        side === "new" ? lineTooltips.new : lineTooltips.old;
+
+      if (tooltipSource.size === 0) {
         return wrapInAnchor(content);
       }
 
-      const lineNumber = computeNewLineNumber(change);
+      const lineNumber =
+        side === "new"
+          ? computeNewLineNumber(change)
+          : computeOldLineNumber(change);
       if (lineNumber <= 0) {
         return wrapInAnchor(content);
       }
 
-      const tooltipMeta = lineTooltips.get(lineNumber);
+      const tooltipMeta = tooltipSource.get(lineNumber);
       if (!tooltipMeta) {
         return wrapInAnchor(content);
       }
 
       const isAutoTooltipOpen =
-        autoTooltipLineNumber !== null && lineNumber === autoTooltipLineNumber;
+        autoTooltipLine !== null &&
+        autoTooltipLine.side === side &&
+        autoTooltipLine.lineNumber === lineNumber;
 
       return wrapInAnchor(
         <HeatmapGutterTooltip
-          key={`heatmap-gutter-${lineNumber}`}
+          key={`heatmap-gutter-${side}-${lineNumber}`}
           isAutoOpen={isAutoTooltipOpen}
           tooltipMeta={tooltipMeta}
         >
@@ -1413,7 +1771,7 @@ function FileDiffCard({
     };
 
     return renderGutterWithTooltip;
-  }, [lineTooltips, autoTooltipLineNumber]);
+  }, [lineTooltips, autoTooltipLine]);
 
   const tokens = useMemo<HunkTokens | null>(() => {
     if (!diff) {
@@ -1453,7 +1811,8 @@ function FileDiffCard({
       return null;
     }
 
-    return extractAutomatedReviewText(review.codexReviewOutput);
+    return JSON.stringify(review.codexReviewOutput, null, 2);
+    // return extractAutomatedReviewText(review.codexReviewOutput);
   }, [review]);
 
   // const showReview = Boolean(reviewContent);
@@ -1469,148 +1828,159 @@ function FileDiffCard({
         id={anchorId}
         ref={cardRef}
         className={cn(
-          "overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm transition focus:outline-none",
-          isActive ? "ring-1 ring-sky-200" : "ring-0"
+          "border border-neutral-200 bg-white transition focus:outline-none",
+          isActive ? "" : ""
         )}
         tabIndex={-1}
         aria-current={isActive}
       >
-        <button
-          type="button"
-          onClick={() => setIsCollapsed((previous) => !previous)}
-          className="flex w-full items-center gap-3 border-b border-neutral-200 bg-neutral-50/80 px-3.5 py-2.5 text-left transition hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-          aria-expanded={!isCollapsed}
-        >
-          <span className="flex h-5 w-5 items-center justify-center text-neutral-400">
-            {isCollapsed ? (
-              <ChevronRight className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5" />
+        <div className="flex flex-col divide-y divide-neutral-200">
+          <button
+            type="button"
+            onClick={() => setIsCollapsed((previous) => !previous)}
+            className={clsx(
+              "sticky top-0 z-10 flex w-full items-center gap-0 border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-left font-sans font-medium transition hover:bg-neutral-100 focus:outline-none focus-visible:outline-none"
             )}
-          </span>
-
-          <span
-            className={cn(
-              "flex h-5 w-5 items-center justify-center",
-              statusMeta.colorClassName
-            )}
+            aria-expanded={!isCollapsed}
           >
-            {statusMeta.icon}
-            <span className="sr-only">{statusMeta.label}</span>
-          </span>
-
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="font-mono text-xs text-neutral-700 truncate">
-              {file.filename}
+            <span className="flex h-5 w-5 items-center justify-center text-neutral-400">
+              {isCollapsed ? (
+                <ChevronRight className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
             </span>
-            {file.previous_filename ? (
-              <span className="font-mono text-[11px] text-neutral-500 truncate">
-                Renamed from {file.previous_filename}
-              </span>
-            ) : null}
-          </div>
 
-          <div className="flex items-center gap-2 text-[11px] font-medium text-neutral-600">
-            <span className="text-emerald-600">+{file.additions}</span>
-            <span className="text-rose-600">-{file.deletions}</span>
-          </div>
-        </button>
-
-        {showReview ? (
-          <div className="border-b border-neutral-200 bg-sky-50 px-4 py-4">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-sky-700">
-              <Sparkles className="h-4 w-4" aria-hidden />
-              Automated review
-            </div>
-            <pre className="mt-2 max-h-[9.5rem] overflow-hidden whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-neutral-900">
-              {reviewContent}
-            </pre>
-          </div>
-        ) : null}
-
-        {!isCollapsed ? (
-          diff ? (
-            <Diff
-              diffType={diff.type}
-              hunks={diff.hunks}
-              viewType="split"
-              optimizeSelection
-              className="diff-syntax system-mono overflow-auto bg-white text-xs leading-5 text-neutral-800"
-              gutterClassName="system-mono bg-white text-xs text-neutral-500"
-              codeClassName="system-mono text-xs text-neutral-800"
-              tokens={tokens ?? undefined}
-              renderToken={renderHeatmapToken}
-              renderGutter={renderHeatmapGutter}
-              generateLineClassName={({ changes, defaultGenerate }) => {
-                const defaultClassName = defaultGenerate();
-                const classNames: string[] = ["system-mono text-xs py-1"];
-                const normalizedChanges = changes.filter(
-                  (change): change is ChangeData => Boolean(change)
-                );
-                const hasFocus =
-                  focusedLineNumber !== null &&
-                  normalizedChanges.some((change) => {
-                    const newLineNumber = computeNewLineNumber(change);
-                    return (
-                      newLineNumber > 0 && newLineNumber === focusedLineNumber
-                    );
-                  });
-                if (hasFocus) {
-                  classNames.push("cmux-heatmap-focus");
-                }
-                if (diffHeatmap && diffHeatmap.lineClasses.size > 0) {
-                  let bestHeatmapClass: string | null = null;
-                  for (const change of normalizedChanges) {
-                    const newLineNumber = computeNewLineNumber(change);
-                    if (newLineNumber <= 0) {
-                      continue;
-                    }
-                    const candidate =
-                      diffHeatmap.lineClasses.get(newLineNumber);
-                    if (!candidate) {
-                      continue;
-                    }
-                    if (!bestHeatmapClass) {
-                      bestHeatmapClass = candidate;
-                      continue;
-                    }
-                    const currentTier = extractHeatmapTier(bestHeatmapClass);
-                    const nextTier = extractHeatmapTier(candidate);
-                    if (nextTier > currentTier) {
-                      bestHeatmapClass = candidate;
-                    }
-                  }
-
-                  if (bestHeatmapClass) {
-                    classNames.push(bestHeatmapClass);
-                  }
-                }
-
-                classNames.push("text-neutral-800");
-
-                return cn(defaultClassName, classNames);
-              }}
+            <span
+              className={cn(
+                "flex h-5 w-5 items-center justify-center pl-2",
+                statusMeta.colorClassName
+              )}
             >
-              {(hunks) =>
-                hunks.map((hunk) => (
-                  <Fragment key={hunk.content}>
-                    <Decoration>
-                      <div className="bg-sky-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-sky-700">
-                        {hunk.content}
-                      </div>
-                    </Decoration>
-                    <Hunk hunk={hunk} />
-                  </Fragment>
-                ))
-              }
-            </Diff>
-          ) : (
-            <div className="bg-neutral-50 px-4 py-6 text-sm text-neutral-600">
-              {error ??
-                "Diff content is unavailable for this file. It might be binary or too large to display."}
+              {statusMeta.icon}
+              <span className="sr-only">{statusMeta.label}</span>
+            </span>
+
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="pl-1.5 text-sm text-neutral-700 truncate">
+                {file.filename}
+              </span>
             </div>
-          )
-        ) : null}
+
+            <div className="flex items-center gap-2 text-[13px] font-medium text-neutral-600">
+              <span className="text-emerald-600">+{file.additions}</span>
+              <span className="text-rose-600">-{file.deletions}</span>
+            </div>
+          </button>
+
+          {showReview && reviewContent ? (
+            <div className="border-b border-neutral-200 bg-sky-50 px-4 py-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-sky-700">
+                  <Sparkles className="h-4 w-4" aria-hidden />
+                  Automated review
+                </div>
+                <CopyButton text={reviewContent} />
+              </div>
+              <pre className="mt-2 max-h-[9.5rem] overflow-auto whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-neutral-900">
+                {reviewContent}
+              </pre>
+            </div>
+          ) : null}
+
+          {!isCollapsed &&
+            (diff ? (
+              <Diff
+                diffType={diff.type}
+                hunks={diff.hunks}
+                viewType="split"
+                optimizeSelection
+                className="diff-syntax system-mono overflow-auto bg-white text-xs leading-5 text-neutral-800"
+                gutterClassName="system-mono bg-white text-xs text-neutral-500"
+                codeClassName="system-mono text-xs text-neutral-800"
+                tokens={tokens ?? undefined}
+                renderToken={renderHeatmapToken}
+                renderGutter={renderHeatmapGutter}
+                generateLineClassName={({ changes, defaultGenerate }) => {
+                  const defaultClassName = defaultGenerate();
+                  const classNames: string[] = ["system-mono text-xs py-1"];
+                  const normalizedChanges = changes.filter(
+                    (change): change is ChangeData => Boolean(change)
+                  );
+                  const hasFocus =
+                    focusedLine !== null &&
+                    normalizedChanges.some((change) =>
+                      doesChangeMatchLine(change, focusedLine)
+                    );
+                  if (hasFocus) {
+                    classNames.push("cmux-heatmap-focus");
+                  }
+                  if (
+                    diffHeatmap &&
+                    (diffHeatmap.lineClasses.size > 0 ||
+                      diffHeatmap.oldLineClasses.size > 0)
+                  ) {
+                    let bestHeatmapClass: string | null = null;
+
+                    const considerClass = (candidate: string | undefined) => {
+                      if (!candidate) {
+                        return;
+                      }
+                      if (!bestHeatmapClass) {
+                        bestHeatmapClass = candidate;
+                        return;
+                      }
+                      const currentTier = extractHeatmapTier(bestHeatmapClass);
+                      const nextTier = extractHeatmapTier(candidate);
+                      if (nextTier > currentTier) {
+                        bestHeatmapClass = candidate;
+                      }
+                    };
+                    for (const change of normalizedChanges) {
+                      const newLineNumber = computeNewLineNumber(change);
+                      if (newLineNumber > 0) {
+                        considerClass(
+                          diffHeatmap.lineClasses.get(newLineNumber)
+                        );
+                      }
+                      const oldLineNumber = computeOldLineNumber(change);
+                      if (oldLineNumber > 0) {
+                        considerClass(
+                          diffHeatmap.oldLineClasses.get(oldLineNumber)
+                        );
+                      }
+                    }
+
+                    if (bestHeatmapClass) {
+                      classNames.push(bestHeatmapClass);
+                    }
+                  }
+
+                  classNames.push("text-neutral-800");
+
+                  return cn(defaultClassName, classNames);
+                }}
+              >
+                {(hunks) =>
+                  hunks.map((hunk) => (
+                    <Fragment key={hunk.content}>
+                      <Decoration>
+                        <div className="bg-sky-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-sky-700">
+                          {hunk.content}
+                        </div>
+                      </Decoration>
+                      <Hunk hunk={hunk} />
+                    </Fragment>
+                  ))
+                }
+              </Diff>
+            ) : (
+              <div className="bg-neutral-50 px-4 py-6 text-sm text-neutral-600">
+                {error ??
+                  "Diff content is unavailable for this file. It might be binary or too large to display."}
+              </div>
+            ))}
+        </div>
       </article>
     </TooltipProvider>
   );
@@ -1714,30 +2084,30 @@ function getHeatmapTooltipTheme(score: number): HeatmapTooltipTheme {
     case 4:
       return {
         contentClass:
-          "bg-rose-900/95 border-rose-500/40 text-rose-50 shadow-lg shadow-rose-950/40",
-        titleClass: "text-rose-100",
-        reasonClass: "text-rose-200",
+          "bg-orange-100 border-orange-300 text-neutral-900 shadow-lg shadow-orange-200/70",
+        titleClass: "text-neutral-900",
+        reasonClass: "text-neutral-800",
       };
     case 3:
       return {
         contentClass:
-          "bg-rose-800/95 border-rose-400/40 text-rose-50 shadow-lg shadow-rose-950/30",
-        titleClass: "text-rose-100",
-        reasonClass: "text-rose-200",
+          "bg-amber-100 border-amber-300 text-neutral-900 shadow-lg shadow-amber-200/70",
+        titleClass: "text-neutral-900",
+        reasonClass: "text-neutral-800",
       };
     case 2:
       return {
         contentClass:
-          "bg-amber-800/95 border-amber-400/40 text-amber-50 shadow-lg shadow-amber-950/30",
-        titleClass: "text-amber-100",
-        reasonClass: "text-amber-200",
+          "bg-yellow-100 border-yellow-200 text-neutral-900 shadow-lg shadow-yellow-200/60",
+        titleClass: "text-neutral-900",
+        reasonClass: "text-neutral-800",
       };
     case 1:
       return {
         contentClass:
-          "bg-amber-900/95 border-amber-500/40 text-amber-50 shadow-lg shadow-amber-950/40",
-        titleClass: "text-amber-100",
-        reasonClass: "text-amber-200",
+          "bg-yellow-50 border-yellow-200 text-neutral-900 shadow-lg shadow-yellow-200/50",
+        titleClass: "text-neutral-900",
+        reasonClass: "text-neutral-700",
       };
     default:
       return {
@@ -1759,7 +2129,7 @@ function extractHeatmapTier(className: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function extractAutomatedReviewText(value: unknown): string | null {
+function _extractAutomatedReviewText(value: unknown): string | null {
   if (value === null || value === undefined) {
     return null;
   }
@@ -1774,7 +2144,7 @@ function extractAutomatedReviewText(value: unknown): string | null {
       "response" in value &&
       typeof (value as { response?: unknown }).response === "string"
     ) {
-      return extractAutomatedReviewText(
+      return _extractAutomatedReviewText(
         (value as { response: string }).response
       );
     }
@@ -1810,7 +2180,8 @@ function formatLineReviews(entries: unknown[]): string | null {
     }
 
     const record = entry as Record<string, unknown>;
-    const line = typeof record.line === "string" ? record.line.trim() : null;
+    const rawLine = typeof record.line === "string" ? record.line : null;
+    const line = rawLine?.trim() ?? null;
     if (!line) {
       continue;
     }
@@ -1825,7 +2196,14 @@ function formatLineReviews(entries: unknown[]): string | null {
         ? record.shouldBeReviewedScore
         : null;
 
-    const changeFlag = record.hasChanged === false ? null : "Changed";
+    let changeFlag: string | null = null;
+    if (typeof rawLine === "string") {
+      if (rawLine.startsWith("+")) {
+        changeFlag = "Added";
+      } else if (rawLine.startsWith("-")) {
+        changeFlag = "Removed";
+      }
+    }
 
     const parts: string[] = [`Line ${line}`];
     if (changeFlag) {
@@ -1887,24 +2265,44 @@ function scrollElementToViewportCenter(
   });
 }
 
-function buildChangeKeyIndex(diff: FileData | null): Map<number, string> {
-  const map = new Map<number, string>();
+function buildChangeKeyIndex(diff: FileData | null): Map<string, string> {
+  const map = new Map<string, string>();
   if (!diff) {
     return map;
   }
 
   for (const hunk of diff.hunks) {
     for (const change of hunk.changes) {
-      const lineNumber = computeNewLineNumber(change);
-      if (lineNumber <= 0) {
-        continue;
+      const newLineNumber = computeNewLineNumber(change);
+      if (newLineNumber > 0) {
+        map.set(buildLineKey("new", newLineNumber), getChangeKey(change));
       }
 
-      map.set(lineNumber, getChangeKey(change));
+      const oldLineNumber = computeOldLineNumber(change);
+      if (oldLineNumber > 0) {
+        map.set(buildLineKey("old", oldLineNumber), getChangeKey(change));
+      }
     }
   }
 
   return map;
+}
+
+function buildLineKey(side: DiffLineSide, lineNumber: number): string {
+  return `${side}:${lineNumber}`;
+}
+
+function doesChangeMatchLine(
+  change: ChangeData,
+  target: DiffLineLocation
+): boolean {
+  if (target.side === "new") {
+    const newLineNumber = computeNewLineNumber(change);
+    return newLineNumber > 0 && newLineNumber === target.lineNumber;
+  }
+
+  const oldLineNumber = computeOldLineNumber(change);
+  return oldLineNumber > 0 && oldLineNumber === target.lineNumber;
 }
 
 function buildDiffText(file: GithubFileChange): string {
@@ -2045,4 +2443,12 @@ function getParentPaths(path: string): string[] {
     parents.push(segments.slice(0, index).join("/"));
   }
   return parents;
+}
+
+function buildRenameMissingDiffMessage(file: GithubFileChange): string {
+  const previousPath = file.previous_filename;
+  if (previousPath) {
+    return `File renamed from ${previousPath} to ${file.filename}.`;
+  }
+  return "File renamed without diff details.";
 }

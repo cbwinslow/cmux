@@ -1,4 +1,8 @@
-import { computeNewLineNumber, isDelete, type FileData } from "react-diff-view";
+import {
+  computeNewLineNumber,
+  computeOldLineNumber,
+  type FileData,
+} from "react-diff-view";
 import type { RangeTokenNode } from "react-diff-view";
 
 export type ReviewHeatmapLine = {
@@ -6,24 +10,35 @@ export type ReviewHeatmapLine = {
   lineText: string | null;
   score: number | null;
   reason: string | null;
-  mostImportantCharacterIndex: number | null;
+  mostImportantWord: string | null;
 };
 
 export type DiffHeatmap = {
   lineClasses: Map<number, string>;
+  oldLineClasses: Map<number, string>;
   newRanges: HeatmapRangeNode[];
   entries: Map<number, ResolvedHeatmapLine>;
+  oldEntries: Map<number, ResolvedHeatmapLine>;
+  totalEntries: number;
 };
 
 export type HeatmapRangeNode = RangeTokenNode & {
   className: string;
 };
 
-type ResolvedHeatmapLine = {
+export type ResolvedHeatmapLine = {
+  side: DiffLineSide;
   lineNumber: number;
   score: number | null;
   reason: string | null;
-  mostImportantCharacterIndex: number | null;
+  mostImportantWord: string | null;
+};
+
+type DiffLineSide = "new" | "old";
+
+type CollectedLineContent = {
+  newLines: Map<number, string>;
+  oldLines: Map<number, string>;
 };
 
 const SCORE_CLAMP_MIN = 0;
@@ -68,8 +83,8 @@ export function parseReviewHeatmap(raw: unknown): ReviewHeatmapLine[] {
     }
 
     const reason = parseNullableString(record.shouldReviewWhy);
-    const mostImportantCharacterIndex = parseNullableInteger(
-      record.mostImportantCharacterIndex
+    const mostImportantWord = parseNullableString(
+      record.mostImportantWord
     );
 
     parsed.push({
@@ -77,7 +92,7 @@ export function parseReviewHeatmap(raw: unknown): ReviewHeatmapLine[] {
       lineText,
       score: normalizedScore,
       reason,
-      mostImportantCharacterIndex,
+      mostImportantWord,
     });
   }
 
@@ -100,9 +115,9 @@ export function buildDiffHeatmap(
     return null;
   }
 
-  const newLineContent = collectNewLineContent(diff);
+  const lineContent = collectLineContent(diff);
 
-  const resolvedEntries = resolveLineNumbers(reviewHeatmap, newLineContent);
+  const resolvedEntries = resolveLineNumbers(reviewHeatmap, lineContent);
   if (resolvedEntries.length === 0) {
     return null;
   }
@@ -113,9 +128,15 @@ export function buildDiffHeatmap(
   }
 
   const lineClasses = new Map<number, string>();
+  const oldLineClasses = new Map<number, string>();
   const characterRanges: HeatmapRangeNode[] = [];
+  const entries = new Map<number, ResolvedHeatmapLine>();
+  const oldEntries = new Map<number, ResolvedHeatmapLine>();
 
-  for (const [lineNumber, entry] of aggregated.entries()) {
+  for (const entry of aggregated.values()) {
+    const targetEntries = entry.side === "new" ? entries : oldEntries;
+    targetEntries.set(entry.lineNumber, entry);
+
     const normalizedScore =
       entry.score === null
         ? null
@@ -123,56 +144,79 @@ export function buildDiffHeatmap(
     const tier = computeHeatmapTier(normalizedScore);
 
     if (tier > 0) {
-      lineClasses.set(lineNumber, `cmux-heatmap-tier-${tier}`);
+      const targetClassMap =
+        entry.side === "new" ? lineClasses : oldLineClasses;
+      targetClassMap.set(entry.lineNumber, `cmux-heatmap-tier-${tier}`);
     }
 
-    if (entry.mostImportantCharacterIndex === null) {
+    if (
+      entry.side === "old" ||
+      !entry.mostImportantWord
+    ) {
       continue;
     }
 
-    const content = newLineContent.get(lineNumber);
+    const content = lineContent.newLines.get(entry.lineNumber);
     if (!content || content.length === 0) {
       continue;
     }
 
+    const highlight = deriveHighlightRange(content, entry.mostImportantWord);
+    if (!highlight) {
+      continue;
+    }
+
     const highlightIndex = clamp(
-      Math.floor(entry.mostImportantCharacterIndex),
+      highlight.start,
       0,
       Math.max(content.length - 1, 0)
+    );
+    const highlightLength = clamp(
+      Math.floor(highlight.length),
+      1,
+      Math.max(content.length - highlightIndex, 1)
     );
 
     const charTier = tier > 0 ? tier : 1;
     const range: HeatmapRangeNode = {
       type: "span",
-      lineNumber,
+      lineNumber: entry.lineNumber,
       start: highlightIndex,
-      length: Math.min(1, Math.max(content.length - highlightIndex, 1)),
+      length: highlightLength,
       className: `cmux-heatmap-char cmux-heatmap-char-tier-${charTier}`,
     };
     characterRanges.push(range);
   }
 
-  if (lineClasses.size === 0 && characterRanges.length === 0) {
+  if (
+    lineClasses.size === 0 &&
+    oldLineClasses.size === 0 &&
+    characterRanges.length === 0
+  ) {
     return null;
   }
 
   return {
     lineClasses,
+    oldLineClasses,
     newRanges: characterRanges,
-    entries: aggregated,
+    entries,
+    oldEntries,
+    totalEntries: aggregated.size,
   };
 }
 
 function aggregateEntries(
   entries: ResolvedHeatmapLine[]
-): Map<number, ResolvedHeatmapLine> {
-  const aggregated = new Map<number, ResolvedHeatmapLine>();
+): Map<string, ResolvedHeatmapLine> {
+  const aggregated = new Map<string, ResolvedHeatmapLine>();
 
   for (const entry of entries) {
-    const current = aggregated.get(entry.lineNumber);
+    const key = buildLineKey(entry.side, entry.lineNumber);
+    const current = aggregated.get(key);
 
     if (!current) {
-      aggregated.set(entry.lineNumber, { ...entry });
+      aggregated.set(key, { ...entry });
       continue;
     }
 
@@ -180,68 +224,197 @@ function aggregateEntries(
     const nextScore = entry.score ?? SCORE_CLAMP_MIN;
     const shouldReplaceScore = nextScore > currentScore;
 
-    aggregated.set(entry.lineNumber, {
+    aggregated.set(key, {
       lineNumber: entry.lineNumber,
+      side: entry.side,
       score: shouldReplaceScore ? entry.score : current.score,
       reason: entry.reason ?? current.reason,
-      mostImportantCharacterIndex:
-        entry.mostImportantCharacterIndex ?? current.mostImportantCharacterIndex,
+      mostImportantWord:
+        entry.mostImportantWord ?? current.mostImportantWord,
     });
   }
 
   return aggregated;
 }
 
+function buildLineKey(side: DiffLineSide, lineNumber: number): string {
+  return `${side}:${lineNumber}`;
+}
+
 function resolveLineNumbers(
   entries: ReviewHeatmapLine[],
-  lineContent: Map<number, string>
+  lineContent: CollectedLineContent
 ): ResolvedHeatmapLine[] {
   const resolved: ResolvedHeatmapLine[] = [];
-  const lineEntries = Array.from(lineContent.entries());
-  const searchOffsets = new Map<string, number>();
+  const { newLines, oldLines } = lineContent;
+  const newLineEntries = Array.from(newLines.entries());
+  const oldLineEntries = Array.from(oldLines.entries());
+  const newSearchOffsets = new Map<string, number>();
+  const oldSearchOffsets = new Map<string, number>();
 
   for (const entry of entries) {
     if (entry.score === null) {
       continue;
     }
 
-    const directLine =
-      entry.lineNumber && lineContent.has(entry.lineNumber)
-        ? entry.lineNumber
-        : null;
+    const directMatch = resolveDirectLineNumber(
+      entry,
+      lineContent
+    );
 
-    if (directLine) {
+    if (directMatch) {
       resolved.push({
-        lineNumber: directLine,
+        side: directMatch.side,
+        lineNumber: directMatch.lineNumber,
         score: entry.score,
         reason: entry.reason,
-        mostImportantCharacterIndex: entry.mostImportantCharacterIndex,
+        mostImportantWord: entry.mostImportantWord,
       });
       continue;
     }
 
-    const normalizedTarget = normalizeLineText(entry.lineText);
-    if (!normalizedTarget) {
+    const normalizedTarget = toSearchableText(entry.lineText);
+    if (normalizedTarget) {
+      const newCandidate = findLineByText(
+        normalizedTarget,
+        newLineEntries,
+        newSearchOffsets
+      );
+      if (newCandidate !== null) {
+        resolved.push({
+          side: "new",
+          lineNumber: newCandidate,
+          score: entry.score,
+          reason: entry.reason,
+          mostImportantWord: entry.mostImportantWord,
+        });
+        continue;
+      }
+
+      const oldCandidate = findLineByText(
+        normalizedTarget,
+        oldLineEntries,
+        oldSearchOffsets
+      );
+      if (oldCandidate !== null) {
+        resolved.push({
+          side: "old",
+          lineNumber: oldCandidate,
+          score: entry.score,
+          reason: entry.reason,
+          mostImportantWord: entry.mostImportantWord,
+        });
+        continue;
+      }
+    }
+
+    const normalizedKeyword = toSearchableText(entry.mostImportantWord);
+    if (!normalizedKeyword) {
       continue;
     }
 
-    const candidate = findLineByText(
-      normalizedTarget,
-      lineEntries,
-      searchOffsets
+    const keywordNewCandidate = findLineByText(
+      normalizedKeyword,
+      newLineEntries,
+      newSearchOffsets
     );
-
-    if (candidate !== null) {
+    if (keywordNewCandidate !== null) {
       resolved.push({
-        lineNumber: candidate,
+        side: "new",
+        lineNumber: keywordNewCandidate,
         score: entry.score,
         reason: entry.reason,
-        mostImportantCharacterIndex: entry.mostImportantCharacterIndex,
+        mostImportantWord: entry.mostImportantWord,
+      });
+      continue;
+    }
+
+    const keywordOldCandidate = findLineByText(
+      normalizedKeyword,
+      oldLineEntries,
+      oldSearchOffsets
+    );
+    if (keywordOldCandidate !== null) {
+      resolved.push({
+        side: "old",
+        lineNumber: keywordOldCandidate,
+        score: entry.score,
+        reason: entry.reason,
+        mostImportantWord: entry.mostImportantWord,
       });
     }
   }
 
   return resolved;
+}
+
+function resolveDirectLineNumber(
+  entry: ReviewHeatmapLine,
+  lineContent: CollectedLineContent
+): { side: DiffLineSide; lineNumber: number } | null {
+  const { lineNumber } = entry;
+  if (!lineNumber) {
+    return null;
+  }
+
+  const { newLines, oldLines } = lineContent;
+  const hasNew = newLines.has(lineNumber);
+  const hasOld = oldLines.has(lineNumber);
+
+  if (!hasNew && !hasOld) {
+    return null;
+  }
+
+  if (hasNew && !hasOld) {
+    return doesLineContentMatch(entry, newLines.get(lineNumber))
+      ? { side: "new", lineNumber }
+      : null;
+  }
+
+  if (!hasNew && hasOld) {
+    return doesLineContentMatch(entry, oldLines.get(lineNumber))
+      ? { side: "old", lineNumber }
+      : null;
+  }
+
+  const matchesNew = doesLineContentMatch(entry, newLines.get(lineNumber));
+  const matchesOld = doesLineContentMatch(entry, oldLines.get(lineNumber));
+
+  if (matchesNew && !matchesOld) {
+    return { side: "new", lineNumber };
+  }
+
+  if (matchesOld && !matchesNew) {
+    return { side: "old", lineNumber };
+  }
+
+  if (matchesNew && matchesOld) {
+    return { side: "new", lineNumber };
+  }
+
+  return null;
+}
+
+function doesLineContentMatch(
+  entry: ReviewHeatmapLine,
+  rawContent: string | null | undefined
+): boolean {
+  const normalizedContent = toSearchableText(rawContent);
+  if (!normalizedContent) {
+    return false;
+  }
+
+  const normalizedTarget = toSearchableText(entry.lineText);
+  if (normalizedTarget && normalizedContent.includes(normalizedTarget)) {
+    return true;
+  }
+
+  const normalizedWord = toSearchableText(entry.mostImportantWord);
+  if (normalizedWord && normalizedContent.includes(normalizedWord)) {
+    return true;
+  }
+
+  return !normalizedTarget && !normalizedWord;
 }
 
 function findLineByText(
@@ -254,7 +427,7 @@ function findLineByText(
 
   for (let index = startIndex; index < entriesCount; index += 1) {
     const [lineNumber, rawText] = lineEntries[index]!;
-    const normalizedSource = normalizeLineText(rawText);
+    const normalizedSource = toSearchableText(rawText);
     if (!normalizedSource) {
       continue;
     }
@@ -279,28 +452,149 @@ function normalizeLineText(value: string | null | undefined): string | null {
     return null;
   }
 
-  return value.replace(/\s+/g, " ").trim();
+  const { content } = stripDiffMarker(value);
+  const normalized = content.replace(/\s+/g, " ").trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
-function collectNewLineContent(diff: FileData): Map<number, string> {
-  const map = new Map<number, string>();
+function toSearchableText(value: string | null | undefined): string | null {
+  const normalized = normalizeLineText(value);
+  return normalized ? normalized.toLowerCase() : null;
+}
+
+function collectLineContent(diff: FileData): CollectedLineContent {
+  const newLines = new Map<number, string>();
+  const oldLines = new Map<number, string>();
 
   for (const hunk of diff.hunks) {
     for (const change of hunk.changes) {
-      const lineNumber = computeNewLineNumber(change);
-      if (lineNumber < 0) {
-        continue;
+      const newLineNumber = computeNewLineNumber(change);
+      if (newLineNumber > 0) {
+        newLines.set(newLineNumber, change.content ?? "");
       }
 
-      if (isDelete(change)) {
-        continue;
+      const oldLineNumber = computeOldLineNumber(change);
+      if (oldLineNumber > 0) {
+        oldLines.set(oldLineNumber, change.content ?? "");
       }
-
-      map.set(lineNumber, change.content ?? "");
     }
   }
 
-  return map;
+  return {
+    newLines,
+    oldLines,
+  };
+}
+
+function deriveHighlightRange(
+  rawContent: string,
+  mostImportantWord: string | null
+): { start: number; length: number } | null {
+  if (!rawContent || !mostImportantWord) {
+    return null;
+  }
+
+  const trimmedWord = mostImportantWord.trim();
+  if (!trimmedWord) {
+    return null;
+  }
+
+  const { content, offset } = stripDiffMarker(rawContent);
+  if (!content) {
+    return null;
+  }
+
+  const candidates = buildHighlightCandidates(trimmedWord);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const lowerContent = content.toLowerCase();
+
+  for (const candidate of candidates) {
+    const directIndex = content.indexOf(candidate);
+    if (directIndex >= 0) {
+      return {
+        start: directIndex + offset,
+        length: Math.max(candidate.length, 1),
+      };
+    }
+
+    const lowerCandidate = candidate.toLowerCase();
+    const lowerIndex = lowerContent.indexOf(lowerCandidate);
+    if (lowerIndex >= 0) {
+      return {
+        start: lowerIndex + offset,
+        length: Math.max(candidate.length, 1),
+      };
+    }
+  }
+
+  const fallbackIndex = content.search(/\S/);
+  if (fallbackIndex >= 0) {
+    return {
+      start: fallbackIndex + offset,
+      length: 1,
+    };
+  }
+
+  return null;
+}
+
+function stripDiffMarker(value: string): { content: string; offset: number } {
+  if (!value) {
+    return { content: "", offset: 0 };
+  }
+
+  const firstChar = value[0] ?? "";
+  if (firstChar === "+" || firstChar === "-" || firstChar === " ") {
+    return { content: value.slice(1), offset: 1 };
+  }
+
+  return { content: value, offset: 0 };
+}
+
+function buildHighlightCandidates(word: string): string[] {
+  const candidates = new Set<string>();
+
+  const addCandidate = (value: string | null | undefined): void => {
+    if (!value) {
+      return;
+    }
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      return;
+    }
+    candidates.add(trimmed);
+  };
+
+  const base = stripSurroundingQuotes(word.trim());
+  addCandidate(word);
+  addCandidate(base);
+  addCandidate(sanitizeHighlightToken(base));
+
+  const tokens = base.split(/\s+/).filter(Boolean);
+  for (const token of tokens) {
+    addCandidate(token);
+    addCandidate(sanitizeHighlightToken(token));
+
+    if (token.includes(".")) {
+      for (const segment of token.split(".").filter(Boolean)) {
+        addCandidate(segment);
+        addCandidate(sanitizeHighlightToken(segment));
+      }
+    }
+  }
+
+  return Array.from(candidates);
+}
+
+function stripSurroundingQuotes(value: string): string {
+  return value.replace(/^["'`]+|["'`]+$/g, "");
+}
+
+function sanitizeHighlightToken(value: string): string {
+  return value.replace(/^[^A-Za-z0-9_$]+/, "").replace(/[^A-Za-z0-9_$]+$/, "");
 }
 
 function computeHeatmapTier(score: number | null): number {
@@ -325,7 +619,21 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function parseLineNumber(value: unknown): number | null {
-  const numeric = parseNullableNumber(value);
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const integer = Math.floor(value);
+    return integer > 0 ? integer : null;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const candidate = extractLineNumberCandidate(value);
+  if (!candidate) {
+    return null;
+  }
+
+  const numeric = parseNullableNumber(candidate);
   if (numeric === null) {
     return null;
   }
@@ -351,18 +659,20 @@ function parseNullableNumber(value: unknown): number | null {
   return null;
 }
 
-function parseNullableInteger(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.floor(value);
+function extractLineNumberCandidate(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
   }
 
-  if (typeof value === "string") {
-    const match = value.match(/-?\d+/);
-    if (!match) {
-      return null;
-    }
-    const parsed = Number.parseInt(match[0] ?? "", 10);
-    return Number.isFinite(parsed) ? parsed : null;
+  if (/^[+-]?\d+(\.\d+)?$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const lineMatch =
+    trimmed.match(/^line\s*([+-]?\d+(?:\.\d+)?)(?:\s*[:\-–])?$/i);
+  if (lineMatch && lineMatch[1]) {
+    return lineMatch[1];
   }
 
   return null;
