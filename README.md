@@ -1,5 +1,5 @@
 <h1 align="center">cmux</h1>
-<p align="center">open source Claude Code manager that supports Codex/Gemini/Cursor/OpenCode/Amp CLI</p>
+<p align="center">Open source Claude Code manager that supports Codex/Gemini/Cursor/OpenCode/Amp CLI</p>
 
 <p align="center">
   <a href="https://www.cmux.dev/direct-download-macos">
@@ -9,12 +9,12 @@
 
 cmux lets you spawn Claude Code, Codex CLI, Cursor CLI, Gemini CLI, Amp, Opencode, and other coding agent CLIs in parallel across multiple tasks.
 
-Each agent runs in its own Docker container, launching VS Code with a Git diff UI and a terminal for its CLI.
+Every run spins up an isolated VS Code workspace either in the cloud or in a local Docker container with the git diff view, terminal, and dev server preview ready so parallel agent work stays verifiable, fast, and ready to ship.
 
-![cmux screenshot](./docs/assets/cmux-demo-00.png)
-![cmux screenshot](./docs/assets/cmux-demo-10.png)
-![cmux screenshot](./docs/assets/cmux-demo-20.png)
-![cmux screenshot](./docs/assets/cmux-demo-30.png)
+![cmux screenshot](./docs/assets/cmux0.png)
+![cmux screenshot](./docs/assets/cmux1.png)
+![cmux screenshot](./docs/assets/cmux2.png)
+![cmux screenshot](./docs/assets/cmux3.png)
 
 ## Install
 
