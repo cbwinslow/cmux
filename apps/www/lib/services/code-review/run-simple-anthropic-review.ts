@@ -160,9 +160,7 @@ function parseRepoSlug(prIdentifier: string): RepoSlug | null {
     // Not a URL, fall through to pattern checks.
   }
 
-  const hashMatch = prIdentifier.match(
-    /^([\w.-]+)\/([\w.-]+)#\d+$/i
-  );
+  const hashMatch = prIdentifier.match(/^([\w.-]+)\/([\w.-]+)#\d+$/i);
   if (hashMatch) {
     return { owner: hashMatch[1], repo: hashMatch[2] };
   }
@@ -340,8 +338,8 @@ export async function runSimpleAnthropicReviewStream(
 
         try {
           const stream = streamText({
-            // model: anthropic("claude-opus-4-1-20250805"),
-            model: anthropic("claude-haiku-4-5"),
+            model: anthropic("claude-opus-4-1-20250805"),
+            // model: anthropic("claude-haiku-4-5"),
             prompt,
             temperature: 0,
             maxRetries: 2,
