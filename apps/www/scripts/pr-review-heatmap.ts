@@ -78,7 +78,7 @@ function getCacheKey(url: string, accept: string): string {
   return `${url}::${accept}`;
 }
 
-function getCachedResponse(url: string, accept: string): unknown | null {
+function _getCachedResponse(url: string, accept: string): unknown | null {
   const key = getCacheKey(url, accept);
   const entry = githubApiCache.get(key);
   if (!entry) {
@@ -93,7 +93,7 @@ function getCachedResponse(url: string, accept: string): unknown | null {
   return entry.data;
 }
 
-function setCachedResponse(url: string, accept: string, data: unknown): void {
+function _setCachedResponse(url: string, accept: string, data: unknown): void {
   const key = getCacheKey(url, accept);
   githubApiCache.set(key, {
     data,
@@ -304,7 +304,7 @@ async function mapWithConcurrency<T, R>(
 }
 
 // Export helper functions and core functions for external use
-export { formatDuration, isBinaryFile, mapWithConcurrency };
+export { formatDuration, isBinaryFile, mapWithConcurrency, collectPrDiffsViaGhCli };
 
 export async function runHeatmapJob(
   options: HeatmapJobOptions
