@@ -434,13 +434,14 @@ function buildFilePrompt(
   filePath: string,
   diffText: string
 ): string {
+  const strippedDiff = stripLeadingTrailingCodeFences(diffText);
   return `You are reviewing a GitHub diff for ${prLabel}
 File path: ${filePath}
 
 ${SIMPLE_REVIEW_GUIDANCE}
 
 Diff:
-${diffText}
+${strippedDiff}
 
 ${SIMPLE_REVIEW_INSTRUCTIONS}`;
 }
@@ -451,4 +452,47 @@ function buildTextPreview(text: string, maxLength = 400): string {
     return collapsed;
   }
   return `${collapsed.slice(0, maxLength - 3)}...`;
+}
+
+function stripLeadingTrailingCodeFences(text: string): string {
+  if (!text) {
+    return text;
+  }
+
+  const lines = text.split(/\r?\n/);
+  let start = 0;
+  let end = lines.length - 1;
+
+  while (start <= end && lines[start]!.trim().length === 0) {
+    start += 1;
+  }
+  while (end >= start && lines[end]!.trim().length === 0) {
+    end -= 1;
+  }
+
+  if (start > end) {
+    return "";
+  }
+
+  const startsWithFence = lines[start]!.trim().startsWith("```");
+  if (startsWithFence) {
+    start += 1;
+    while (start <= end && lines[start]!.trim().startsWith("```")) {
+      start += 1;
+    }
+  }
+
+  const endsWithFence = lines[end]!.trim().startsWith("```");
+  if (endsWithFence) {
+    end -= 1;
+    while (end >= start && lines[end]!.trim().startsWith("```")) {
+      end -= 1;
+    }
+  }
+
+  if (start > end) {
+    return "";
+  }
+
+  return lines.slice(start, end + 1).join("\n");
 }
