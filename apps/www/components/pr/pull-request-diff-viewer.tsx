@@ -1075,10 +1075,14 @@ export function PullRequestDiffViewer({
             ? `Review complete • ${titleSubject}`
             : "Automated review complete";
 
-        new Notification(notificationTitle, {
+        const notification = new Notification(notificationTitle, {
           body,
           tag: "cmux-review-complete",
         });
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
       } catch {
         // Ignore notification errors (for example, blocked constructors)
       } finally {
