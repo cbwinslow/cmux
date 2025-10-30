@@ -6,10 +6,7 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hostname = request.nextUrl.hostname;
 
-  console.log("hostname:", hostname);
-  console.log("pathname:", pathname);
-
-  if (hostname === "github0.com" && pathname === "/") {
+  if (hostname === "0github.com" && pathname === "/") {
     return NextResponse.rewrite(new URL("/heatmap", request.url));
   }
 
