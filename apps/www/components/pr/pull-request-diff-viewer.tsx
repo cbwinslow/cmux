@@ -92,6 +92,8 @@ type PullRequestDiffViewerProps = {
   jobType?: "pull_request" | "comparison";
   commitRef?: string;
   baseCommitRef?: string;
+  pullRequestTitle?: string;
+  pullRequestUrl?: string;
 };
 
 type ParsedFileDiff = {
@@ -491,6 +493,8 @@ export function PullRequestDiffViewer({
   jobType,
   commitRef,
   baseCommitRef,
+  pullRequestTitle,
+  pullRequestUrl,
 }: PullRequestDiffViewerProps) {
   const normalizedJobType: "pull_request" | "comparison" =
     jobType ?? (comparisonSlug ? "comparison" : "pull_request");
@@ -1008,13 +1012,68 @@ export function PullRequestDiffViewer({
       (previousPending === null || previousPending > 0)
     ) {
       try {
-        const title = "Automated review complete";
-        const body =
+        const completionMessage =
           totalFileCount === 1
             ? "Finished reviewing the last file."
             : "Finished reviewing all files in this review.";
+        const isPullRequestReview = normalizedJobType === "pull_request";
+        const sanitizedTitle =
+          typeof pullRequestTitle === "string"
+            ? pullRequestTitle.replace(/\s+/g, " ").trim()
+            : "";
+        const effectiveTitle =
+          sanitizedTitle.length > 0 ? sanitizedTitle : null;
+        const sanitizedUrl =
+          typeof pullRequestUrl === "string" ? pullRequestUrl.trim() : "";
+        const hasValidPrNumber =
+          typeof prNumber === "number" && Number.isFinite(prNumber);
+        const trimmedRepoFullName =
+          repoFullName.trim().length > 0 ? repoFullName.trim() : null;
+        const fallbackUrl =
+          isPullRequestReview && hasValidPrNumber && trimmedRepoFullName
+            ? `https://github.com/${trimmedRepoFullName}/pull/${prNumber}`
+            : null;
+        const effectiveUrl =
+          sanitizedUrl.length > 0 ? sanitizedUrl : fallbackUrl;
+        const repoDescriptor =
+          trimmedRepoFullName && hasValidPrNumber
+            ? `${trimmedRepoFullName}#${prNumber}`
+            : trimmedRepoFullName;
 
-        new Notification(title, {
+        const detailLines: string[] = [];
+
+        if (isPullRequestReview) {
+          const descriptorParts: string[] = [];
+          if (effectiveTitle) {
+            descriptorParts.push(`“${effectiveTitle}”`);
+          }
+          if (repoDescriptor) {
+            descriptorParts.push(repoDescriptor);
+          }
+
+          if (descriptorParts.length > 0) {
+            detailLines.push(descriptorParts.join(" • "));
+          }
+
+          if (effectiveUrl) {
+            detailLines.push(effectiveUrl);
+          }
+        }
+
+        const bodyLines = [completionMessage, ...detailLines].filter(
+          (line) => line && line.length > 0
+        );
+        const body = bodyLines.join("\n");
+        const titleSubject =
+          isPullRequestReview && (effectiveTitle || repoDescriptor)
+            ? effectiveTitle ?? repoDescriptor
+            : null;
+        const notificationTitle =
+          titleSubject && titleSubject.length > 0
+            ? `Review complete • ${titleSubject}`
+            : "Automated review complete";
+
+        new Notification(notificationTitle, {
           body,
           tag: "cmux-review-complete",
         });
@@ -1030,6 +1089,11 @@ export function PullRequestDiffViewer({
     pendingFileCount,
     shouldNotifyOnCompletion,
     totalFileCount,
+    normalizedJobType,
+    pullRequestTitle,
+    pullRequestUrl,
+    repoFullName,
+    prNumber,
   ]);
 
   const handleEnableCompletionNotification = useCallback(async () => {

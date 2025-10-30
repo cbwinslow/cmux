@@ -706,6 +706,21 @@ function PullRequestDiffSection({
       `${githubOwner}/${repo}`;
     const commitRef = pullRequest.head?.sha ?? undefined;
     const baseCommitRef = pullRequest.base?.sha ?? undefined;
+    const pullRequestTitleRaw =
+      typeof pullRequest.title === "string" ? pullRequest.title : "";
+    const pullRequestTitle =
+      pullRequestTitleRaw.trim().length > 0
+        ? pullRequestTitleRaw.trim()
+        : null;
+    const fallbackPullRequestUrl = `https://github.com/${fallbackRepoFullName}/pull/${pullNumber}`;
+    const pullRequestHtmlUrl =
+      typeof pullRequest.html_url === "string"
+        ? pullRequest.html_url.trim()
+        : "";
+    const pullRequestUrl =
+      pullRequestHtmlUrl.length > 0
+        ? pullRequestHtmlUrl
+        : fallbackPullRequestUrl;
 
     return (
       <ReviewDiffContent
@@ -715,6 +730,8 @@ function PullRequestDiffSection({
         reviewTarget={{ type: "pull_request", prNumber: pullNumber }}
         commitRef={commitRef}
         baseCommitRef={baseCommitRef}
+        pullRequestTitle={pullRequestTitle}
+        pullRequestUrl={pullRequestUrl}
       />
     );
   } catch (error) {
