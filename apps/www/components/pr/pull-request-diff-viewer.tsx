@@ -2581,8 +2581,9 @@ function FileDiffCard({
     }
 
     const enhancers =
-      diffHeatmap && diffHeatmap.newRanges.length > 0
-        ? [pickRanges([], diffHeatmap.newRanges)]
+      diffHeatmap &&
+      (diffHeatmap.newRanges.length > 0 || diffHeatmap.oldRanges.length > 0)
+        ? [pickRanges(diffHeatmap.oldRanges, diffHeatmap.newRanges)]
         : undefined;
 
     if (language && refractor.registered(language)) {
