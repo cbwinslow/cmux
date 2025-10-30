@@ -30,6 +30,7 @@ import {
   Copy,
   Check,
   Loader2,
+  Star,
 } from "lucide-react";
 import {
   Decoration,
@@ -54,6 +55,7 @@ import { useConvexQuery } from "@convex-dev/react-query";
 import type { FunctionReturnType } from "convex/server";
 import type { GithubFileChange } from "@/lib/github/fetch-pull-request";
 import { cn } from "@/lib/utils";
+import CmuxLogo from "@/components/logo/cmux-logo";
 import {
   Tooltip,
   TooltipContent,
@@ -1463,11 +1465,14 @@ export function PullRequestDiffViewer({
         >
           <div className="flex flex-col gap-3">
             <div className="lg:sticky lg:top-0 lg:z-10 lg:bg-white">
-              <ReviewProgressIndicator
-                totalFileCount={totalFileCount}
-                processedFileCount={processedFileCount}
-                isLoading={isLoadingFileOutputs}
-              />
+              <div className="flex flex-col gap-3">
+                <ReviewProgressIndicator
+                  totalFileCount={totalFileCount}
+                  processedFileCount={processedFileCount}
+                  isLoading={isLoadingFileOutputs}
+                />
+                <CmuxPromoCard />
+              </div>
             </div>
             {notificationCardState ? (
               <ReviewCompletionNotificationCard state={notificationCardState} />
@@ -1680,6 +1685,53 @@ function ReviewProgressIndicator({
           aria-valuemax={totalFileCount}
           aria-valuenow={processedFileCount ?? 0}
         />
+      </div>
+    </div>
+  );
+}
+
+function CmuxPromoCard() {
+  return (
+    <div className="border border-neutral-200 bg-white p-5 pt-4 text-sm text-neutral-700">
+      <div className="flex items-start gap-3">
+        <a
+          href="https://cmux.dev"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Visit cmux.dev"
+          className="inline-flex h-12 w-12 items-center justify-center rounded-md bg-neutral-900"
+        >
+          <CmuxLogo height={24} label="cmux" showWordmark={false} />
+        </a>
+        <div className="flex-1 space-y-2">
+          <p className="text-sm font-semibold text-neutral-900">
+            cmux powers this review
+          </p>
+          <p className="text-xs text-neutral-500 leading-relaxed">
+            Automate more of your pull request workflow with cmux. Visit
+            cmux.dev and star github.com/manaflow-ai/cmux to keep the momentum
+            going.
+          </p>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <a
+              href="https://cmux.dev"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-neutral-800"
+            >
+              Explore cmux.dev
+            </a>
+            <a
+              href="https://github.com/manaflow-ai/cmux"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-md border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:border-neutral-300 hover:bg-neutral-50"
+            >
+              <Star className="h-3.5 w-3.5" aria-hidden />
+              Star on GitHub
+            </a>
+          </div>
+        </div>
       </div>
     </div>
   );
