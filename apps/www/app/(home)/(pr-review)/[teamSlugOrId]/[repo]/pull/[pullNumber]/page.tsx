@@ -236,7 +236,7 @@ export default async function PullRequestPage({ params }: PageProps) {
   ).then((files) => files.map(toGithubFileChange));
 
   // Schedule code review in background (non-blocking)
-  if (ENABLE_IMMEDIATE_CODE_REVIEW) {
+  if (selectedTeam && ENABLE_IMMEDIATE_CODE_REVIEW) {
     scheduleCodeReviewStart({
       teamSlugOrId: selectedTeam.id,
       githubOwner,
