@@ -2096,7 +2096,7 @@ function ReviewProgressIndicator({
 function CmuxPromoCard() {
   return (
     <div className="border border-neutral-200 bg-white p-5 pt-4 text-sm text-neutral-700">
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
         <div className="flex flex-row items-center justify-start gap-2 text-center">
           <p className="text-xs font-mono leading-relaxed text-neutral-900 font-bold">
             From the creators of
@@ -2116,7 +2116,7 @@ function CmuxPromoCard() {
             />
           </a>
         </div>
-        <div className="space-y-2">
+        <div className="mb-1">
           <p className="text-xs font-mono leading-relaxed text-neutral-500">
             We also made a Claude Code/Codex manager! Check out cmux if you want heatmaps for your vibe coded diffs (coming soon)!
           </p>
