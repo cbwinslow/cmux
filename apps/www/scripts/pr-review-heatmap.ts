@@ -766,30 +766,18 @@ async function fetchGithubResponse(
   }
 ): Promise<unknown> {
   const url = buildGithubApiUrl(baseUrl, path);
-
-  // Check cache first
-  const cached = getCachedResponse(url, accept);
-  if (cached !== null) {
-    return cached;
-  }
-
-  // Cache miss - fetch from GitHub
   const response = await fetch(url, {
     headers: buildGithubHeaders(token, accept),
   });
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `GitHub API request to ${url} failed with status ${response.status
+      `GitHub API request to ${url} failed with status ${
+        response.status
       }: ${errorText.slice(0, 2000)}`
     );
   }
-  const data = responseType === "json" ? await response.json() : await response.text();
-
-  // Cache the response
-  setCachedResponse(url, accept, data);
-
-  return data;
+  return responseType === "json" ? response.json() : response.text();
 }
 
 interface ParsedPrIdentifier {
