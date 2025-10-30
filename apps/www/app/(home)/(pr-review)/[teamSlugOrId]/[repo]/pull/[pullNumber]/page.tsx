@@ -207,13 +207,13 @@ export default async function PullRequestPage({ params }: PageProps) {
     { authToken: githubAccessToken }
   ).then((files) => files.map(toGithubFileChange));
 
-  scheduleCodeReviewStart({
-    teamSlugOrId: selectedTeam.id,
-    githubOwner,
-    repo,
-    pullNumber,
-    pullRequestPromise,
-  });
+  // scheduleCodeReviewStart({
+  //   teamSlugOrId: selectedTeam.id,
+  //   githubOwner,
+  //   repo,
+  //   pullNumber,
+  //   pullRequestPromise,
+  // });
 
   return (
     <div className="min-h-dvh bg-neutral-50 text-neutral-900">
@@ -243,7 +243,7 @@ export default async function PullRequestPage({ params }: PageProps) {
 
 type PullRequestPromise = ReturnType<typeof fetchPullRequest>;
 
-function scheduleCodeReviewStart({
+function _scheduleCodeReviewStart({
   teamSlugOrId,
   githubOwner,
   repo,

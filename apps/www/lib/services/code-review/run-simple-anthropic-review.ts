@@ -203,8 +203,8 @@ export async function runSimpleAnthropicReviewStream(
 
         try {
           const stream = streamText({
-            model: anthropic("claude-opus-4-1-20250805"),
-            // model: anthropic("claude-sonnet-4-5"),
+            // model: anthropic("claude-opus-4-1-20250805"),
+            model: anthropic("claude-haiku-4-5"),
             prompt,
             temperature: 0,
             maxRetries: 2,
