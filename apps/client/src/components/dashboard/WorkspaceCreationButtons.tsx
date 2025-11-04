@@ -1,5 +1,3 @@
-import type { SelectOption } from "@/components/ui/searchable-select";
-import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Tooltip,
   TooltipContent,
@@ -7,33 +5,36 @@ import {
 } from "@/components/ui/tooltip";
 import { useExpandTasks } from "@/contexts/expand-tasks/ExpandTasksContext";
 import { useSocket } from "@/contexts/socket/use-socket";
+import { useTheme } from "@/components/theme/use-theme";
 import { api } from "@cmux/convex/api";
-import type { CreateLocalWorkspaceResponse } from "@cmux/shared";
+import type { Id } from "@cmux/convex/dataModel";
+import type {
+  CreateLocalWorkspaceResponse,
+  CreateCloudWorkspaceResponse,
+} from "@cmux/shared";
 import { useMutation } from "convex/react";
-import { Server as ServerIcon, Plus, FolderOpen } from "lucide-react";
+import { Server as ServerIcon, FolderOpen, Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
-import { useNavigate } from "@tanstack/react-router";
 
 type WorkspaceCreationButtonsProps = {
   teamSlugOrId: string;
-  projectOptions: SelectOption[];
+  selectedProject: string[];
+  isEnvSelected: boolean;
 };
 
 export function WorkspaceCreationButtons({
   teamSlugOrId,
-  projectOptions,
+  selectedProject,
+  isEnvSelected,
 }: WorkspaceCreationButtonsProps) {
   const { socket } = useSocket();
   const { addTaskToExpand } = useExpandTasks();
-  const navigate = useNavigate();
-  const [isCreatingLocal, setIsCreatingLocal] = useState(false);
-  const [showLocalPicker, setShowLocalPicker] = useState(false);
-  const [showCloudPicker, setShowCloudPicker] = useState(false);
-  const [selectedRepo, setSelectedRepo] = useState<string[]>([]);
-  const [selectedEnvironment, setSelectedEnvironment] = useState<string[]>([]);
+  const { theme } = useTheme();
+  const [isCreating, setIsCreating] = useState(false);
 
   const reserveLocalWorkspace = useMutation(api.localWorkspaces.reserve);
+  const createTask = useMutation(api.tasks.create);
 
   const handleCreateLocalWorkspace = useCallback(async () => {
     if (!socket) {
@@ -41,15 +42,20 @@ export function WorkspaceCreationButtons({
       return;
     }
 
-    if (selectedRepo.length === 0) {
-      toast.error("Please select a repository");
+    if (selectedProject.length === 0) {
+      toast.error("Please select a repository first");
       return;
     }
 
-    const projectFullName = selectedRepo[0];
+    if (isEnvSelected) {
+      toast.error("Local workspaces require a repository, not an environment");
+      return;
+    }
+
+    const projectFullName = selectedProject[0];
     const repoUrl = `https://github.com/${projectFullName}.git`;
 
-    setIsCreatingLocal(true);
+    setIsCreating(true);
 
     try {
       const reservation = await reserveLocalWorkspace({
@@ -81,8 +87,6 @@ export function WorkspaceCreationButtons({
               toast.success(
                 `Local workspace "${reservation.workspaceName}" created successfully`
               );
-              setShowLocalPicker(false);
-              setSelectedRepo([]);
             } else {
               toast.error(
                 response.error || "Failed to create local workspace"
@@ -96,145 +100,141 @@ export function WorkspaceCreationButtons({
       console.error("Error creating local workspace:", error);
       toast.error("Failed to create local workspace");
     } finally {
-      setIsCreatingLocal(false);
+      setIsCreating(false);
     }
   }, [
     socket,
-    selectedRepo,
+    selectedProject,
+    isEnvSelected,
     teamSlugOrId,
     reserveLocalWorkspace,
     addTaskToExpand,
   ]);
 
-  const handleCreateCloudWorkspace = useCallback(() => {
-    if (selectedEnvironment.length === 0) {
-      toast.error("Please select an environment");
+  const handleCreateCloudWorkspace = useCallback(async () => {
+    if (!socket) {
+      toast.error("Socket not connected");
       return;
     }
 
-    const environmentId = selectedEnvironment[0].replace(/^env:/, "");
-    // Navigate to dashboard with environment preselected
-    navigate({
-      to: "/$teamSlugOrId/dashboard",
-      params: { teamSlugOrId },
-      search: { environmentId },
-    });
-    setShowCloudPicker(false);
-    setSelectedEnvironment([]);
-  }, [selectedEnvironment, navigate, teamSlugOrId]);
+    if (selectedProject.length === 0) {
+      toast.error("Please select an environment first");
+      return;
+    }
 
-  // Filter options for local (repos only) and cloud (environments only)
-  const repoOptions = projectOptions.filter((opt) => {
-    if (typeof opt === "string") return false;
-    return opt.iconKey === "github" && !opt.heading;
-  });
-  const environmentOptions = projectOptions.filter((opt) => {
-    if (typeof opt === "string") return false;
-    return opt.iconKey === "environment" && !opt.heading;
-  });
+    if (!isEnvSelected) {
+      toast.error("Cloud workspaces require an environment, not a repository");
+      return;
+    }
+
+    const projectFullName = selectedProject[0];
+    const environmentId = projectFullName.replace(
+      /^env:/,
+      ""
+    ) as Id<"environments">;
+
+    setIsCreating(true);
+
+    try {
+      // Create task in Convex without task description (it's just a workspace)
+      const taskId = await createTask({
+        teamSlugOrId,
+        text: "Cloud Workspace",
+        projectFullName: undefined, // No repo for cloud environment workspaces
+        baseBranch: undefined, // No branch for environments
+        environmentId,
+      });
+
+      // Hint the sidebar to auto-expand this task once it appears
+      addTaskToExpand(taskId);
+
+      await new Promise<void>((resolve) => {
+        socket.emit(
+          "create-cloud-workspace",
+          {
+            teamSlugOrId,
+            environmentId,
+            taskId,
+            theme,
+          },
+          async (response: CreateCloudWorkspaceResponse) => {
+            if (response.success) {
+              toast.success("Cloud workspace created successfully");
+            } else {
+              toast.error(
+                response.error || "Failed to create cloud workspace"
+              );
+            }
+            resolve();
+          }
+        );
+      });
+
+      console.log("Cloud workspace created:", taskId);
+    } catch (error) {
+      console.error("Error creating cloud workspace:", error);
+      toast.error("Failed to create cloud workspace");
+    } finally {
+      setIsCreating(false);
+    }
+  }, [
+    socket,
+    selectedProject,
+    isEnvSelected,
+    teamSlugOrId,
+    createTask,
+    addTaskToExpand,
+    theme,
+  ]);
+
+  const canCreateLocal = selectedProject.length > 0 && !isEnvSelected;
+  const canCreateCloud = selectedProject.length > 0 && isEnvSelected;
 
   return (
-    <div className="flex items-center gap-2 mb-6">
-      {/* Local Workspace Button */}
-      <div className="flex items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setShowLocalPicker(!showLocalPicker)}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              <span>New Local Workspace</span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            Create a new local workspace from a repository
-          </TooltipContent>
-        </Tooltip>
+    <div className="flex items-center gap-2 mb-3">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={handleCreateLocalWorkspace}
+            disabled={!canCreateLocal || isCreating}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium transition-colors rounded-lg bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isCreating ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <FolderOpen className="w-3.5 h-3.5" />
+            )}
+            <span>Create Local Workspace</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {!selectedProject.length
+            ? "Select a repository first"
+            : isEnvSelected
+              ? "Switch to repository mode (not environment)"
+              : "Create workspace from selected repository"}
+        </TooltipContent>
+      </Tooltip>
 
-        {showLocalPicker && (
-          <div className="flex items-center gap-2">
-            <div className="min-w-[300px]">
-              <SearchableSelect
-                options={repoOptions}
-                value={selectedRepo}
-                onChange={setSelectedRepo}
-                placeholder="Select repository..."
-                singleSelect={true}
-                disabled={isCreatingLocal}
-              />
-            </div>
-            <button
-              onClick={handleCreateLocalWorkspace}
-              disabled={selectedRepo.length === 0 || isCreatingLocal}
-              className="flex items-center gap-1 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              {isCreatingLocal ? "Creating..." : "Create"}
-            </button>
-            <button
-              onClick={() => {
-                setShowLocalPicker(false);
-                setSelectedRepo([]);
-              }}
-              className="px-3 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Cloud Workspace Button */}
-      {environmentOptions.length > 0 && (
-        <div className="flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setShowCloudPicker(!showCloudPicker)}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
-              >
-                <ServerIcon className="w-4 h-4" />
-                <span>New Cloud Workspace</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              Create a new cloud workspace from an environment
-            </TooltipContent>
-          </Tooltip>
-
-          {showCloudPicker && (
-            <div className="flex items-center gap-2">
-              <div className="min-w-[300px]">
-                <SearchableSelect
-                  options={environmentOptions}
-                  value={selectedEnvironment}
-                  onChange={setSelectedEnvironment}
-                  placeholder="Select environment..."
-                  singleSelect={true}
-                />
-              </div>
-              <button
-                onClick={handleCreateCloudWorkspace}
-                disabled={selectedEnvironment.length === 0}
-                className="flex items-center gap-1 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Create
-              </button>
-              <button
-                onClick={() => {
-                  setShowCloudPicker(false);
-                  setSelectedEnvironment([]);
-                }}
-                className="px-3 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={handleCreateCloudWorkspace}
+            disabled={!canCreateCloud || isCreating}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium transition-colors rounded-lg bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ServerIcon className="w-3.5 h-3.5" />
+            <span>Create Cloud Workspace</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {!selectedProject.length
+            ? "Select an environment first"
+            : !isEnvSelected
+              ? "Switch to environment mode (not repository)"
+              : "Create workspace from selected environment"}
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 }

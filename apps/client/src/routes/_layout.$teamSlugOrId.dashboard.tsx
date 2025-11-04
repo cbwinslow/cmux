@@ -816,7 +816,8 @@ function DashboardComponent() {
             {/* Workspace Creation Buttons */}
             <WorkspaceCreationButtons
               teamSlugOrId={teamSlugOrId}
-              projectOptions={projectOptions}
+              selectedProject={selectedProject}
+              isEnvSelected={isEnvSelected}
             />
 
             <DashboardMainCard
