@@ -1029,11 +1029,65 @@ export function setupSocketHandlers(
           return;
         }
 
+        const convex = getConvex();
+        if (projectFullName) {
+          const normalizedRequestedRepo = projectFullName.toLowerCase();
+          if (!providedTaskId) {
+            callback({
+              success: false,
+              error: "taskId is required when launching a repo workspace",
+            });
+            return;
+          }
+
+          const task = await convex.query(api.tasks.getById, {
+            teamSlugOrId,
+            id: providedTaskId,
+          });
+
+          const normalizedTaskRepo = task?.projectFullName?.trim();
+          if (!task || !normalizedTaskRepo) {
+            callback({
+              success: false,
+              error: "Task not found or missing repository metadata",
+            });
+            return;
+          }
+
+          if (normalizedTaskRepo.toLowerCase() !== normalizedRequestedRepo) {
+            callback({
+              success: false,
+              error: "Task repository does not match requested repository",
+            });
+            return;
+          }
+
+          if (repoUrl) {
+            const repoUrlMatch = repoUrl.match(
+              /github\.com\/?([^\s/]+)\/([^\s/.]+)(?:\.git)?/i
+            );
+            if (!repoUrlMatch) {
+              callback({
+                success: false,
+                error: "Repository URL must reference GitHub",
+              });
+              return;
+            }
+
+            const derivedProjectFullName = `${repoUrlMatch[1]}/${repoUrlMatch[2]}`.toLowerCase();
+            if (derivedProjectFullName !== normalizedRequestedRepo) {
+              callback({
+                success: false,
+                error: "Repository URL does not match the selected repository",
+              });
+              return;
+            }
+          }
+        }
+
         const workspaceTargetLabel = environmentId
           ? `environment ${environmentId}`
           : `repository ${projectFullName}`;
-
-        const convex = getConvex();
         let taskId: Id<"tasks"> | undefined = providedTaskId;
         let taskRunId: Id<"taskRuns"> | null = null;
         let responded = false;

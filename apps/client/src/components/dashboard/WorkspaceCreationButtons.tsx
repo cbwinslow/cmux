@@ -13,7 +13,7 @@ import type {
   CreateCloudWorkspaceResponse,
   CreateCloudWorkspace,
 } from "@cmux/shared";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
 import { Server as ServerIcon, FolderOpen, Loader2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -22,12 +22,14 @@ type WorkspaceCreationButtonsProps = {
   teamSlugOrId: string;
   selectedProject: string[];
   isEnvSelected: boolean;
+  environments?: Doc<"environments">[] | null;
 };
 
 export function WorkspaceCreationButtons({
   teamSlugOrId,
   selectedProject,
   isEnvSelected,
+  environments,
 }: WorkspaceCreationButtonsProps) {
   const { socket } = useSocket();
   const { addTaskToExpand } = useExpandTasks();
@@ -37,14 +39,10 @@ export function WorkspaceCreationButtons({
 
   const reserveLocalWorkspace = useMutation(api.localWorkspaces.reserve);
   const createTask = useMutation(api.tasks.create);
-  const environments = useQuery(api.environments.list, { teamSlugOrId });
 
   const environmentById = useMemo(() => {
     const map = new Map<Id<"environments">, Doc<"environments">>();
-    if (!environments) {
-      return map;
-    }
-    environments.forEach((environment) => {
+    (environments ?? []).forEach((environment) => {
       map.set(environment._id, environment);
     });
     return map;
