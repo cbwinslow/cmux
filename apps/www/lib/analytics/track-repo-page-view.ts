@@ -24,11 +24,11 @@ type RepoPageViewEvent = {
   userId?: string;
 };
 
-export async function trackRepoPageView(event: RepoPageViewEvent): Promise<void> {
+export function trackRepoPageView(event: RepoPageViewEvent): Promise<void> {
   const client = getPostHogClient();
   if (!client) {
     console.warn("[analytics] PostHog client not initialized - missing API key");
-    return;
+    return Promise.resolve();
   }
 
   try {
@@ -42,9 +42,9 @@ export async function trackRepoPageView(event: RepoPageViewEvent): Promise<void>
         comparison: event.comparison,
       },
     });
-
-    await client.shutdown();
+    return Promise.resolve();
   } catch (error) {
     console.error("[analytics] Failed to track repo page view", error);
+    return Promise.resolve();
   }
 }
