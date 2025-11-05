@@ -229,7 +229,7 @@ function TaskTreeInner({
   const canExpand = true;
   const isCrownEvaluating = task.crownEvaluationStatus === "in_progress";
   const isLocalWorkspace = task.isLocalWorkspace;
-  const isCloudWorkspace = Boolean(task.environmentId && !task.projectFullName);
+  const isCloudWorkspace = task.isCloudWorkspace;
 
   const taskLeadingIcon = (() => {
     if (isCrownEvaluating) {
@@ -601,7 +601,7 @@ function TaskRunTreeInner({
   );
 
   const isLocalWorkspaceRunEntry = run.isLocalWorkspace;
-  const isCloudWorkspaceRunEntry = Boolean(run.environmentId);
+  const isCloudWorkspaceRunEntry = run.isCloudWorkspace;
 
   const statusIcon = {
     pending: <Circle className="w-3 h-3 text-neutral-400" />,

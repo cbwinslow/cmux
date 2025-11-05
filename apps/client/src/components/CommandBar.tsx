@@ -583,6 +583,7 @@ export function CommandBar({ teamSlugOrId }: CommandBarProps) {
           projectFullName: undefined, // No repo for cloud environment workspaces
           baseBranch: undefined, // No branch for environments
           environmentId,
+          isCloudWorkspace: true,
         });
 
         // Hint the sidebar to auto-expand this task once it appears
