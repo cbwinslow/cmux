@@ -20,6 +20,7 @@ import {
   toMorphXtermBaseUrl,
   toProxyWorkspaceUrl,
 } from "@/lib/toProxyWorkspaceUrl";
+import { buildTerminalCommand } from "@/lib/terminal-command";
 import {
   TASK_RUN_IFRAME_ALLOW,
   TASK_RUN_IFRAME_SANDBOX,
@@ -104,6 +105,7 @@ export const Route = createFileRoute("/_layout/$teamSlugOrId/task/$taskId/")({
       : taskRuns[0];
 
     const rawWorkspaceUrl = selectedRun?.vscode?.workspaceUrl ?? null;
+    const isCloudWorkspace = Boolean(selectedRun?.isCloudWorkspace);
     if (!rawWorkspaceUrl) {
       return;
     }
@@ -132,16 +134,17 @@ export const Route = createFileRoute("/_layout/$teamSlugOrId/task/$taskId/")({
 
     if (!tabs?.length) {
       try {
+        const request = buildTerminalCommand({
+          intent: "create-session",
+          isCloudWorkspace,
+        });
         const created = await createTerminalTab({
           baseUrl,
-          request: {
-            cmd: "tmux",
-            args: ["new-session", "-A", "cmux"],
-          },
+          request,
         });
         tabs = [created.id];
       } catch (error) {
-        console.error("Failed to create default tmux terminal", error);
+        console.error("Failed to create default terminal", error);
         return;
       }
     }

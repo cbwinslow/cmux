@@ -17,6 +17,7 @@ import {
   type TerminalConnectionState,
 } from "@/components/task-run-terminal-session";
 import { toMorphXtermBaseUrl } from "@/lib/toProxyWorkspaceUrl";
+import { buildTerminalCommand } from "@/lib/terminal-command";
 import {
   createTerminalTab,
   deleteTerminalTab,
@@ -77,13 +78,15 @@ export const Route = createFileRoute(
       return;
     }
 
+    const request = buildTerminalCommand({
+      intent: "attach-session",
+      isCloudWorkspace: Boolean(taskRun?.isCloudWorkspace),
+    });
+
     try {
       const created = await createTerminalTab({
         baseUrl,
-        request: {
-          cmd: "tmux",
-          args: ["attach", "-t", "cmux"],
-        },
+        request,
       });
 
       queryClient.setQueryData<TerminalTabId[]>(tabsQueryKey, (current) => {
@@ -96,7 +99,7 @@ export const Route = createFileRoute(
         return [...current, created.id];
       });
     } catch (error) {
-      console.error("Failed to auto-create tmux terminal", error);
+      console.error("Failed to auto-create terminal", error);
     }
   },
 });

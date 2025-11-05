@@ -8,6 +8,7 @@ import { useMemo, useState, useEffect, useRef } from "react";
 import z from "zod";
 import { TaskRunTerminalSession } from "@/components/task-run-terminal-session";
 import { toMorphXtermBaseUrl } from "@/lib/toProxyWorkspaceUrl";
+import { buildTerminalCommand } from "@/lib/terminal-command";
 import { createTerminalTab, terminalTabsQueryKey, terminalTabsQueryOptions, type TerminalTabId } from "@/queries/terminals";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { convexQuery } from "@convex-dev/react-query";
@@ -66,16 +67,17 @@ export const Route = createFileRoute(
       return;
     }
 
+    const request = buildTerminalCommand({
+      intent: "attach-session",
+      isCloudWorkspace: Boolean(taskRun?.isCloudWorkspace),
+    });
+
     // Create terminal in background without blocking
     (async () => {
       try {
-        // Attach to cmux session
         const created = await createTerminalTab({
           baseUrl,
-          request: {
-            cmd: "tmux",
-            args: ["attach", "-t", "cmux"],
-          },
+          request,
         });
 
         queryClient.setQueryData<TerminalTabId[]>(tabsQueryKey, (current) => {
@@ -88,7 +90,7 @@ export const Route = createFileRoute(
           return [...current, created.id];
         });
       } catch (error) {
-        console.error("Failed to auto-create tmux terminal", error);
+        console.error("Failed to auto-create terminal", error);
       }
     })();
   },

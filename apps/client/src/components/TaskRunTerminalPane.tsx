@@ -3,6 +3,7 @@ import { MonitorUp } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { TaskRunTerminalSession } from "./task-run-terminal-session";
 import { toMorphXtermBaseUrl } from "@/lib/toProxyWorkspaceUrl";
+import { buildTerminalCommand } from "@/lib/terminal-command";
 import {
   createTerminalTab,
   terminalTabsQueryKey,
@@ -12,13 +13,17 @@ import {
 
 export interface TaskRunTerminalPaneProps {
   workspaceUrl: string | null;
+  isCloudWorkspace?: boolean;
 }
 
 const INITIAL_AUTO_CREATE_DELAY_MS = 4_000;
 const MAX_AUTO_CREATE_ATTEMPTS = 3;
 const AUTO_RETRY_BASE_DELAY_MS = 4_000;
 
-export function TaskRunTerminalPane({ workspaceUrl }: TaskRunTerminalPaneProps) {
+export function TaskRunTerminalPane({
+  workspaceUrl,
+  isCloudWorkspace = false,
+}: TaskRunTerminalPaneProps) {
   const baseUrl = useMemo(() => {
     if (!workspaceUrl) {
       return null;
@@ -128,12 +133,14 @@ export function TaskRunTerminalPane({ workspaceUrl }: TaskRunTerminalPaneProps) 
 
       (async () => {
         try {
+          const request = buildTerminalCommand({
+            intent: "attach-session",
+            isCloudWorkspace,
+          });
+
           const created = await createTerminalTab({
             baseUrl,
-            request: {
-              cmd: "tmux",
-              args: ["attach", "-t", "cmux"],
-            },
+            request,
           });
 
           queryClient.setQueryData<TerminalTabId[]>(tabsQueryKey, (current) => {
@@ -148,7 +155,7 @@ export function TaskRunTerminalPane({ workspaceUrl }: TaskRunTerminalPaneProps) 
 
           resetAutoCreate();
         } catch (error) {
-          console.error("Failed to auto-create tmux terminal", error);
+          console.error("Failed to auto-create terminal", error);
           inFlightRef.current = false;
 
           const shouldRetryAutomatically =
@@ -166,13 +173,16 @@ export function TaskRunTerminalPane({ workspaceUrl }: TaskRunTerminalPaneProps) 
           }
 
           const message =
-            error instanceof Error ? error.message : "Unable to connect to tmux session.";
+            error instanceof Error
+              ? error.message
+              : "Unable to connect to tmux session.";
           setAutoCreateError(message);
         }
       })();
     },
     [
       baseUrl,
+      isCloudWorkspace,
       queryClient,
       resetAutoCreate,
       tabsQueryKey,
@@ -183,7 +193,7 @@ export function TaskRunTerminalPane({ workspaceUrl }: TaskRunTerminalPaneProps) 
 
   useEffect(() => {
     resetAutoCreate();
-  }, [baseUrl, resetAutoCreate, workspaceUrl]);
+  }, [baseUrl, isCloudWorkspace, resetAutoCreate, workspaceUrl]);
 
   useEffect(() => {
     if (isTabsLoading || isTabsError) {
