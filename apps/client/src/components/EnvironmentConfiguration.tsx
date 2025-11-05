@@ -47,6 +47,7 @@ import {
   type ReactNode,
 } from "react";
 import TextareaAutosize from "react-textarea-autosize";
+import { toast } from "sonner";
 
 export function EnvironmentConfiguration({
   selectedRepos,
@@ -375,12 +376,12 @@ export function EnvironmentConfiguration({
         },
         {
           onSuccess: async () => {
+            toast.success("Snapshot version created");
             onEnvironmentSaved?.();
             await navigate({
-              to: "/$teamSlugOrId/environments/$environmentId",
+              to: "/$teamSlugOrId/environments",
               params: {
                 teamSlugOrId,
-                environmentId: sourceEnvironmentId,
               },
               search: () => ({
                 step: undefined,
@@ -415,6 +416,7 @@ export function EnvironmentConfiguration({
         },
         {
           onSuccess: async () => {
+            toast.success("Environment saved");
             onEnvironmentSaved?.();
             await navigate({
               to: "/$teamSlugOrId/environments",
