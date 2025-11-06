@@ -215,6 +215,8 @@ jobs:
     needs: prepare-release
     environment: electron
     runs-on: self-hosted
+    env:
+      BUN_INSTALL: ${{ runner.temp }}/bun-${{ github.run_id }}-${{ github.job }}
     defaults:
       run:
         working-directory: ./
@@ -229,6 +231,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.2.21
+          no-cache: true
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -298,6 +301,8 @@ jobs:
     needs: prepare-release
     environment: electron
     runs-on: self-hosted
+    env:
+      BUN_INSTALL: ${{ runner.temp }}/bun-${{ github.run_id }}-${{ github.job }}
     defaults:
       run:
         working-directory: ./
@@ -314,6 +319,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.2.21
+          no-cache: true
 
       # x86_64 toolchain for node-gyp and friends
       - name: Ensure Rosetta (for x64 toolchain)
