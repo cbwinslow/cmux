@@ -61,6 +61,7 @@ import {
   selectSuggestedItems,
   useSuggestionHistory,
 } from "./command-bar/useSuggestionHistory";
+import clsx from "clsx";
 
 interface CommandBarProps {
   teamSlugOrId: string;
@@ -108,6 +109,35 @@ const placeholderClassName =
 const COMMAND_LIST_VIRTUALIZATION_THRESHOLD = 40;
 const COMMAND_LIST_ESTIMATED_ROW_HEIGHT = 44;
 const COMMAND_LIST_VIRTUALIZED_FALLBACK_COUNT = 20;
+const COMMAND_PANEL_MAX_HEIGHT_PX = 475; // Keep in sync with container max-h class
+const COMMAND_LIST_VERTICAL_MARGIN_PX = 12; // pt-1 (4px) + pb-2 (8px)
+const COMMAND_LIST_SCROLL_PADDING_TOP_PX = 4;
+const COMMAND_LIST_SCROLL_PADDING_BOTTOM_PX =
+  COMMAND_LIST_SCROLL_PADDING_TOP_PX;
+const adjustContainerScrollForChild = (
+  container: HTMLElement,
+  target: HTMLElement
+): boolean => {
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+
+  const offsetAbove =
+    targetRect.top - (containerRect.top + COMMAND_LIST_SCROLL_PADDING_TOP_PX);
+  if (offsetAbove < 0) {
+    container.scrollTop += offsetAbove;
+    return true;
+  }
+
+  const offsetBelow =
+    targetRect.bottom -
+    (containerRect.bottom - COMMAND_LIST_SCROLL_PADDING_BOTTOM_PX);
+  if (offsetBelow > 0) {
+    container.scrollTop += offsetBelow;
+    return true;
+  }
+
+  return false;
+};
 
 type TeamCommandItem = {
   id: string;
@@ -267,13 +297,17 @@ export function CommandBar({
   const [commandValue, setCommandValue] = useState<string | undefined>(
     undefined
   );
+  const [commandListMaxHeight, setCommandListMaxHeight] = useState(
+    COMMAND_PANEL_MAX_HEIGHT_PX
+  );
   const openRef = useRef<boolean>(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const commandListRef = useRef<HTMLDivElement | null>(null);
   const previousSearchRef = useRef(search);
   const skipNextCloseRef = useRef(false);
-  const stateResetTimeoutRef =
-    useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stateResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   // Used only in non-Electron fallback
   const prevFocusSnapshotRef = useRef<FocusSnapshot | null>(null);
   const navigate = useNavigate();
@@ -292,26 +326,25 @@ export function CommandBar({
     },
     [router]
   );
+  const updateCommandListMaxHeight = useCallback(() => {
+    const inputHeight = inputRef.current?.offsetHeight ?? 0;
+    const availableHeight =
+      COMMAND_PANEL_MAX_HEIGHT_PX -
+      inputHeight -
+      COMMAND_LIST_VERTICAL_MARGIN_PX;
+    setCommandListMaxHeight((current) => {
+      const next = Math.max(0, availableHeight);
+      return Math.abs(next - current) < 0.5 ? current : next;
+    });
+  }, []);
 
   const captureFocusBeforeOpen = useCallback(() => {
     if (typeof document === "undefined") return;
     const active = document.activeElement;
     if (!(active instanceof HTMLElement)) {
       prevFocusSnapshotRef.current = null;
-      console.log("[CommandBar] capture skipped; no HTMLElement active");
       return;
     }
-
-    console.log("[CommandBar] capturing focus", {
-      tag: active.tagName,
-      isContentEditable: active.isContentEditable,
-      hasSelection:
-        active instanceof HTMLInputElement ||
-        active instanceof HTMLTextAreaElement
-          ? typeof active.selectionStart === "number" &&
-            typeof active.selectionEnd === "number"
-          : undefined,
-    });
 
     const snapshot: FocusSnapshot = { element: active };
     if (
@@ -353,22 +386,8 @@ export function CommandBar({
                 endPath,
                 endOffset: range.endOffset,
               };
-              console.log("[CommandBar] captured contenteditable range", {
-                startPath,
-                endPath,
-                startOffset: range.startOffset,
-                endOffset: range.endOffset,
-              });
-            } else {
-              console.log(
-                "[CommandBar] failed to derive paths for contenteditable range"
-              );
             }
-          } else {
-            console.log("[CommandBar] contenteditable range outside element, skip");
           }
-        } else {
-          console.log("[CommandBar] contenteditable has no selection to capture");
         }
       } catch {
         // ignore contenteditable selection capture failures
@@ -376,11 +395,6 @@ export function CommandBar({
     }
 
     prevFocusSnapshotRef.current = snapshot;
-    console.log("[CommandBar] stored focus snapshot", {
-      tag: snapshot.element.tagName,
-      hasSelection: Boolean(snapshot.selection),
-      hasRange: Boolean(snapshot.contentEditableRange),
-    });
   }, []);
 
   const clearPendingStateReset = useCallback(() => {
@@ -445,6 +459,30 @@ export function CommandBar({
       clearPendingStateReset();
     };
   }, [clearPendingStateReset]);
+  useLayoutEffect(() => {
+    if (!open || typeof window === "undefined") {
+      return;
+    }
+    updateCommandListMaxHeight();
+    const handleResize = () => {
+      updateCommandListMaxHeight();
+    };
+    window.addEventListener("resize", handleResize);
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      const inputElement = inputRef.current;
+      if (inputElement) {
+        resizeObserver = new ResizeObserver(() => {
+          updateCommandListMaxHeight();
+        });
+        resizeObserver.observe(inputElement);
+      }
+    }
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      resizeObserver?.disconnect();
+    };
+  }, [open, updateCommandListMaxHeight]);
 
   const stackUser = useUser({ or: "return-null" });
   const stackTeams = stackUser?.useTeams() ?? EMPTY_TEAM_LIST;
@@ -627,16 +665,6 @@ export function CommandBar({
 
   useEffect(() => {
     openRef.current = open;
-  }, [open]);
-
-  useEffect(() => {
-    console.log("[CommandBar] component mounted");
-  }, []);
-
-  useEffect(() => {
-    if (open) {
-      console.log("[CommandBar] palette visible");
-    }
   }, [open]);
 
   useEffect(() => {
@@ -999,7 +1027,6 @@ export function CommandBar({
     // In Electron, prefer global shortcut from main via cmux event.
     if (isElectron) {
       const off = window.cmux.on("shortcut:cmd-k", () => {
-        console.log("[CommandBar] Cmd+K detected via Electron shortcut");
         // Only handle Cmd+K (no shift/ctrl variations)
         if (openRef.current) {
           closeCommand();
@@ -1025,7 +1052,6 @@ export function CommandBar({
         !e.altKey &&
         !e.ctrlKey
       ) {
-        console.log("[CommandBar] Cmd+K detected via web shortcut");
         e.preventDefault();
         if (openRef.current) {
           closeCommand();
@@ -1047,34 +1073,19 @@ export function CommandBar({
       void window.cmux.ui.setCommandPaletteOpen(open);
     }
 
-  if (!open) {
-    console.log("[CommandBar] palette closing; attempting to restore focus");
+    if (!open) {
       const snapshot = prevFocusSnapshotRef.current;
-      console.log("[CommandBar] current snapshot details", {
-        hasSnapshot: Boolean(snapshot),
-        tag: snapshot?.element?.tagName,
-        hasSelection: Boolean(snapshot?.selection),
-        hasRange: Boolean(snapshot?.contentEditableRange),
-      });
-    if (
-      isElectron &&
-      !snapshot?.contentEditableRange &&
-      window.cmux?.ui?.restoreLastFocus
-    ) {
-      console.log("[CommandBar] no contenteditable range; clearing snapshot");
-      prevFocusSnapshotRef.current = null;
-      console.log("[CommandBar] delegating focus restore to Electron");
-      void window.cmux.ui.restoreLastFocus();
+      if (
+        isElectron &&
+        !snapshot?.contentEditableRange &&
+        window.cmux?.ui?.restoreLastFocus
+      ) {
+        prevFocusSnapshotRef.current = null;
+        void window.cmux.ui.restoreLastFocus();
       } else if (snapshot) {
         const { element, selection, contentEditableRange } = snapshot;
         const id = window.setTimeout(() => {
           try {
-            console.log("[CommandBar] restoring focus", {
-              tag: element.tagName,
-              isContentEditable: element.isContentEditable,
-              hasSelection: Boolean(selection),
-              hasRange: Boolean(contentEditableRange),
-            });
             element.focus({ preventScroll: true });
             if (
               selection &&
@@ -1088,8 +1099,8 @@ export function CommandBar({
                   selection.end,
                   selection.direction
                 );
-              } catch {
-                console.warn("[CommandBar] failed to restore input selection");
+              } catch (error) {
+                console.error("Failed to restore selection", error);
               }
             } else if (contentEditableRange && element.isContentEditable) {
               try {
@@ -1110,10 +1121,16 @@ export function CommandBar({
                         node.nodeType === Node.TEXT_NODE &&
                         typeof node.textContent === "string"
                       ) {
-                        return Math.min(Math.max(offset, 0), node.textContent.length);
+                        return Math.min(
+                          Math.max(offset, 0),
+                          node.textContent.length
+                        );
                       }
                       if (node.childNodes.length > 0) {
-                        return Math.min(Math.max(offset, 0), node.childNodes.length);
+                        return Math.min(
+                          Math.max(offset, 0),
+                          node.childNodes.length
+                        );
                       }
                       return Math.max(offset, 0);
                     };
@@ -1127,24 +1144,10 @@ export function CommandBar({
                     );
                     selectionObj.removeAllRanges();
                     selectionObj.addRange(newRange);
-                    console.log("[CommandBar] restored contenteditable range", {
-                      startPath: contentEditableRange.startPath,
-                      endPath: contentEditableRange.endPath,
-                      startOffset: newRange.startOffset,
-                      endOffset: newRange.endOffset,
-                    });
-                  } else {
-                    console.warn(
-                      "[CommandBar] failed to resolve nodes for contenteditable range",
-                      {
-                        startPath: contentEditableRange.startPath,
-                        endPath: contentEditableRange.endPath,
-                      }
-                    );
                   }
                 }
-              } catch {
-                console.warn("[CommandBar] failed to restore contenteditable range");
+              } catch (error) {
+                console.error("Failed to restore contenteditable range", error);
               }
             } else if (element.tagName === "IFRAME") {
               try {
@@ -1156,8 +1159,8 @@ export function CommandBar({
             if (prevFocusSnapshotRef.current === snapshot) {
               prevFocusSnapshotRef.current = null;
             }
-          } catch {
-            console.warn("[CommandBar] focus restore failed");
+          } catch (error) {
+            console.error("Failed to restore focus", error);
           }
         }, 0);
         return () => {
@@ -1166,8 +1169,6 @@ export function CommandBar({
             prevFocusSnapshotRef.current = null;
           }
         };
-      } else {
-        console.log("[CommandBar] no focus snapshot available to restore");
       }
     }
     return undefined;
@@ -2199,31 +2200,29 @@ export function CommandBar({
     enabled: shouldVirtualizeRoot && activePage === "root" && open,
   });
 
-  const localWorkspaceVirtualizer =
-    useVirtualizer<HTMLDivElement, HTMLDivElement>({
-      count: localWorkspaceCommandsToRender.length,
-      getScrollElement: () => commandListRef.current,
-      estimateSize: () => COMMAND_LIST_ESTIMATED_ROW_HEIGHT,
-      overscan: 24,
-      initialRect: { width: 720, height: 400 },
-      enabled:
-        shouldVirtualizeLocal &&
-        activePage === "local-workspaces" &&
-        open,
-    });
+  const localWorkspaceVirtualizer = useVirtualizer<
+    HTMLDivElement,
+    HTMLDivElement
+  >({
+    count: localWorkspaceCommandsToRender.length,
+    getScrollElement: () => commandListRef.current,
+    estimateSize: () => COMMAND_LIST_ESTIMATED_ROW_HEIGHT,
+    overscan: 24,
+    initialRect: { width: 720, height: 400 },
+    enabled: shouldVirtualizeLocal && activePage === "local-workspaces" && open,
+  });
 
-  const cloudWorkspaceVirtualizer =
-    useVirtualizer<HTMLDivElement, HTMLDivElement>({
-      count: cloudWorkspaceCommandsToRender.length,
-      getScrollElement: () => commandListRef.current,
-      estimateSize: () => COMMAND_LIST_ESTIMATED_ROW_HEIGHT,
-      overscan: 24,
-      initialRect: { width: 720, height: 400 },
-      enabled:
-        shouldVirtualizeCloud &&
-        activePage === "cloud-workspaces" &&
-        open,
-    });
+  const cloudWorkspaceVirtualizer = useVirtualizer<
+    HTMLDivElement,
+    HTMLDivElement
+  >({
+    count: cloudWorkspaceCommandsToRender.length,
+    getScrollElement: () => commandListRef.current,
+    estimateSize: () => COMMAND_LIST_ESTIMATED_ROW_HEIGHT,
+    overscan: 24,
+    initialRect: { width: 720, height: 400 },
+    enabled: shouldVirtualizeCloud && activePage === "cloud-workspaces" && open,
+  });
 
   const rootCommandIndexMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -2353,13 +2352,17 @@ export function CommandBar({
       const selector = `[data-value="${escapeValue}"]`;
       const run = () => {
         const target = listEl.querySelector<HTMLElement>(selector);
-        target?.scrollIntoView({ block: "nearest", behavior: "instant" });
+        if (!target) return;
+        const scrolled = adjustContainerScrollForChild(listEl, target);
+        if (!scrolled) {
+          target.scrollIntoView({
+            block: "nearest",
+            inline: "nearest",
+            behavior: "auto",
+          });
+        }
       };
-      if (typeof window.requestAnimationFrame === "function") {
-        window.requestAnimationFrame(run);
-      } else {
-        run();
-      }
+      setTimeout(run, 0);
     },
     [
       activePage,
@@ -2459,20 +2462,26 @@ export function CommandBar({
   return (
     <>
       <div
-        className={`fixed inset-0 z-[var(--z-commandbar)] ${
-          open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-        }`}
+        className={clsx(
+          "fixed inset-0 z-[var(--z-commandbar)]",
+          open
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none"
+        )}
         aria-hidden={!open}
         onClick={closeCommand}
       />
       <div
-        className={`fixed inset-x-0 top-[230px] z-[var(--z-commandbar)] flex items-start justify-center pointer-events-none ${
+        className={clsx(
+          "fixed inset-x-0 top-[230px] z-[var(--z-commandbar)] flex items-start justify-center pointer-events-none",
           open ? "opacity-100" : "opacity-0"
-        }`}
+        )}
       >
         <div
-          className={`w-full max-w-2xl h-[475px] bg-white dark:bg-neutral-900 rounded-xl shadow-2xl border border-neutral-200 dark:border-neutral-700 overflow-hidden flex flex-col ${
-            open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+          className={`w-full max-w-2xl h-auto max-h-[475px] bg-white dark:bg-neutral-900 rounded-xl shadow-2xl border border-neutral-200 dark:border-neutral-700 overflow-hidden flex flex-col ${
+            open
+              ? "opacity-100 pointer-events-auto"
+              : "opacity-0 pointer-events-none"
           }`}
         >
           <Command
@@ -2511,189 +2520,199 @@ export function CommandBar({
             <CommandHighlightListener onHighlight={handleHighlight} />
             <Command.List
               ref={commandListRef}
-              className="flex-1 min-h-0 overflow-y-auto px-1 mb-2 flex flex-col gap-2 mt-1"
+              style={{
+                maxHeight: commandListMaxHeight,
+                scrollPaddingTop: `${COMMAND_LIST_SCROLL_PADDING_TOP_PX}px`,
+                scrollPaddingBottom: `${COMMAND_LIST_SCROLL_PADDING_BOTTOM_PX}px`,
+                scrollPaddingBlockStart: `${COMMAND_LIST_SCROLL_PADDING_TOP_PX}px`,
+                scrollPaddingBlockEnd: `${COMMAND_LIST_SCROLL_PADDING_BOTTOM_PX}px`,
+              }}
+              className="flex-1 min-h-0 overflow-y-auto px-1 pt-1 pb-2 flex flex-col gap-2"
             >
-            <Command.Empty className="py-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
-              {activePage === "teams"
-                ? "No matching teams."
-                : activePage === "local-workspaces"
-                  ? isLocalWorkspaceLoading
-                    ? "Loading repositories…"
-                    : "No matching repositories."
-                  : activePage === "cloud-workspaces"
-                    ? isCloudWorkspaceLoading
-                      ? "Loading workspaces…"
-                      : "No matching workspaces."
-                    : "No results found."}
-            </Command.Empty>
+              <Command.Empty className="py-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
+                {activePage === "teams"
+                  ? "No matching teams."
+                  : activePage === "local-workspaces"
+                    ? isLocalWorkspaceLoading
+                      ? "Loading repositories…"
+                      : "No matching repositories."
+                    : activePage === "cloud-workspaces"
+                      ? isCloudWorkspaceLoading
+                        ? "Loading workspaces…"
+                        : "No matching workspaces."
+                      : "No results found."}
+              </Command.Empty>
 
-            {activePage === "root" ? (
-              <>
-                {rootSuggestionsToRender.length > 0 ? (
-                  <Command.Group>
-                    {rootSuggestionsToRender.map((entry) =>
-                      renderRootCommandEntry(entry)
-                    )}
-                  </Command.Group>
-                ) : null}
-                {rootCommandsToRender.length > 0 ? (
-                  <Command.Group>
-                    {shouldVirtualizeRoot ? (
-                      <VirtualizedCommandItems
-                        entries={rootCommandsToRender}
-                        virtualizer={rootVirtualizer}
-                        renderEntry={renderRootCommandEntry}
-                      />
-                    ) : (
-                      rootCommandsToRender.map((entry) =>
+              {activePage === "root" ? (
+                <>
+                  {rootSuggestionsToRender.length > 0 ? (
+                    <Command.Group>
+                      {rootSuggestionsToRender.map((entry) =>
                         renderRootCommandEntry(entry)
-                      )
-                    )}
-                  </Command.Group>
-                ) : null}
-              </>
-            ) : null}
+                      )}
+                    </Command.Group>
+                  ) : null}
+                  {rootCommandsToRender.length > 0 ? (
+                    <Command.Group>
+                      {shouldVirtualizeRoot ? (
+                        <VirtualizedCommandItems
+                          entries={rootCommandsToRender}
+                          virtualizer={rootVirtualizer}
+                          renderEntry={renderRootCommandEntry}
+                        />
+                      ) : (
+                        rootCommandsToRender.map((entry) =>
+                          renderRootCommandEntry(entry)
+                        )
+                      )}
+                    </Command.Group>
+                  ) : null}
+                </>
+              ) : null}
 
-            {activePage === "local-workspaces" ? (
-              <>
-                {isLocalWorkspaceLoading ? (
-                  <div className={placeholderClassName}>
-                    Loading repositories…
-                  </div>
-                ) : (
-                  <>
-                    {localWorkspaceSuggestionsToRender.length > 0 ? (
-                      <Command.Group>
-                        {localWorkspaceSuggestionsToRender.map((entry) =>
-                          renderLocalWorkspaceCommandEntry(entry)
-                        )}
-                      </Command.Group>
-                    ) : null}
-                    {localWorkspaceSuggestionsToRender.length > 0 &&
-                    localWorkspaceCommandsToRender.length > 0 ? (
-                      <div className="px-2">
-                        <hr className="border-neutral-200 dark:border-neutral-800" />
-                      </div>
-                    ) : null}
-                    {localWorkspaceCommandsToRender.length > 0 ? (
-                      <Command.Group>
-                        {shouldVirtualizeLocal ? (
-                          <VirtualizedCommandItems
-                            entries={localWorkspaceCommandsToRender}
-                            virtualizer={localWorkspaceVirtualizer}
-                            renderEntry={renderLocalWorkspaceCommandEntry}
-                          />
-                        ) : (
-                          localWorkspaceCommandsToRender.map((entry) =>
+              {activePage === "local-workspaces" ? (
+                <>
+                  {isLocalWorkspaceLoading ? (
+                    <div className={placeholderClassName}>
+                      Loading repositories…
+                    </div>
+                  ) : (
+                    <>
+                      {localWorkspaceSuggestionsToRender.length > 0 ? (
+                        <Command.Group>
+                          {localWorkspaceSuggestionsToRender.map((entry) =>
                             renderLocalWorkspaceCommandEntry(entry)
-                          )
-                        )}
-                      </Command.Group>
-                    ) : null}
-                  </>
-                )}
-              </>
-            ) : null}
+                          )}
+                        </Command.Group>
+                      ) : null}
+                      {localWorkspaceSuggestionsToRender.length > 0 &&
+                      localWorkspaceCommandsToRender.length > 0 ? (
+                        <div className="px-2">
+                          <hr className="border-neutral-200 dark:border-neutral-800" />
+                        </div>
+                      ) : null}
+                      {localWorkspaceCommandsToRender.length > 0 ? (
+                        <Command.Group>
+                          {shouldVirtualizeLocal ? (
+                            <VirtualizedCommandItems
+                              entries={localWorkspaceCommandsToRender}
+                              virtualizer={localWorkspaceVirtualizer}
+                              renderEntry={renderLocalWorkspaceCommandEntry}
+                            />
+                          ) : (
+                            localWorkspaceCommandsToRender.map((entry) =>
+                              renderLocalWorkspaceCommandEntry(entry)
+                            )
+                          )}
+                        </Command.Group>
+                      ) : null}
+                    </>
+                  )}
+                </>
+              ) : null}
 
-            {activePage === "cloud-workspaces" ? (
-              <>
-                {isCloudWorkspaceLoading ? (
-                  <div className={placeholderClassName}>
-                    Loading workspaces…
-                  </div>
-                ) : (
-                  <>
-                    {cloudWorkspaceSuggestionsToRender.length > 0 ? (
-                      <Command.Group>
-                        {cloudWorkspaceSuggestionsToRender.map((entry) =>
-                          renderCloudWorkspaceCommandEntry(entry)
-                        )}
-                      </Command.Group>
-                    ) : null}
-                    {cloudWorkspaceSuggestionsToRender.length > 0 &&
-                    cloudWorkspaceCommandsToRender.length > 0 ? (
-                      <div className="px-2">
-                        <hr className="border-neutral-200 dark:border-neutral-800" />
-                      </div>
-                    ) : null}
-                    {cloudWorkspaceCommandsToRender.length > 0 ? (
-                      <Command.Group>
-                        {shouldVirtualizeCloud ? (
-                          <VirtualizedCommandItems
-                            entries={cloudWorkspaceCommandsToRender}
-                            virtualizer={cloudWorkspaceVirtualizer}
-                            renderEntry={renderCloudWorkspaceCommandEntry}
-                          />
-                        ) : (
-                          cloudWorkspaceCommandsToRender.map((entry) =>
+              {activePage === "cloud-workspaces" ? (
+                <>
+                  {isCloudWorkspaceLoading ? (
+                    <div className={placeholderClassName}>
+                      Loading workspaces…
+                    </div>
+                  ) : (
+                    <>
+                      {cloudWorkspaceSuggestionsToRender.length > 0 ? (
+                        <Command.Group>
+                          {cloudWorkspaceSuggestionsToRender.map((entry) =>
                             renderCloudWorkspaceCommandEntry(entry)
-                          )
-                        )}
-                      </Command.Group>
-                    ) : null}
-                  </>
-                )}
-              </>
-            ) : null}
+                          )}
+                        </Command.Group>
+                      ) : null}
+                      {cloudWorkspaceSuggestionsToRender.length > 0 &&
+                      cloudWorkspaceCommandsToRender.length > 0 ? (
+                        <div className="px-2">
+                          <hr className="border-neutral-200 dark:border-neutral-800" />
+                        </div>
+                      ) : null}
+                      {cloudWorkspaceCommandsToRender.length > 0 ? (
+                        <Command.Group>
+                          {shouldVirtualizeCloud ? (
+                            <VirtualizedCommandItems
+                              entries={cloudWorkspaceCommandsToRender}
+                              virtualizer={cloudWorkspaceVirtualizer}
+                              renderEntry={renderCloudWorkspaceCommandEntry}
+                            />
+                          ) : (
+                            cloudWorkspaceCommandsToRender.map((entry) =>
+                              renderCloudWorkspaceCommandEntry(entry)
+                            )
+                          )}
+                        </Command.Group>
+                      ) : null}
+                    </>
+                  )}
+                </>
+              ) : null}
 
-            {activePage === "teams" ? (
-              <>
-                <Command.Group>
-                  <div className="px-2 py-1.5 text-xs text-neutral-500 dark:text-neutral-400">
-                    Teams
-                  </div>
-                  {isTeamsLoading ? (
-                    <Command.Item
-                      value="teams:loading"
-                      disabled
-                      className="flex items-center gap-3 px-3 py-2.5 mx-1 rounded-md cursor-default text-sm text-neutral-500 dark:text-neutral-400"
-                    >
-                      Loading teams…
-                    </Command.Item>
-                  ) : teamCommandEntries.length > 0 ? (
-                    filteredTeamEntries.map(({ value, item }) => (
+              {activePage === "teams" ? (
+                <>
+                  <Command.Group>
+                    <div className="px-2 py-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+                      Teams
+                    </div>
+                    {isTeamsLoading ? (
                       <Command.Item
-                        key={value}
-                        value={value}
-                        data-value={value}
-                        keywords={item.keywords}
-                        onSelect={() => handleSelect(value)}
-                        className="flex items-center gap-3 px-3 py-2.5 mx-1 rounded-md cursor-pointer
+                        value="teams:loading"
+                        disabled
+                        className="flex items-center gap-3 px-3 py-2.5 mx-1 rounded-md cursor-default text-sm text-neutral-500 dark:text-neutral-400"
+                      >
+                        Loading teams…
+                      </Command.Item>
+                    ) : teamCommandEntries.length > 0 ? (
+                      filteredTeamEntries.map(({ value, item }) => (
+                        <Command.Item
+                          key={value}
+                          value={value}
+                          data-value={value}
+                          keywords={item.keywords}
+                          onSelect={() => handleSelect(value)}
+                          className="flex items-center gap-3 px-3 py-2.5 mx-1 rounded-md cursor-pointer
                 hover:bg-neutral-100 dark:hover:bg-neutral-800
                 data-[selected=true]:bg-neutral-100 dark:data-[selected=true]:bg-neutral-800
                 data-[selected=true]:text-neutral-900 dark:data-[selected=true]:text-neutral-100"
-                      >
-                        <Users className="h-4 w-4 text-neutral-500" />
-                        <span className="flex-1 truncate text-sm">
-                          {item.label}
-                        </span>
-                        {item.isCurrent ? (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
-                            current
+                        >
+                          <Users className="h-4 w-4 text-neutral-500" />
+                          <span className="flex-1 truncate text-sm">
+                            {item.label}
                           </span>
-                        ) : null}
+                          {item.isCurrent ? (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
+                              current
+                            </span>
+                          ) : null}
+                        </Command.Item>
+                      ))
+                    ) : (
+                      <Command.Item
+                        value="teams:none"
+                        disabled
+                        className="flex items-center gap-3 px-3 py-2.5 mx-1 rounded-md cursor-default text-sm text-neutral-500 dark:text-neutral-400"
+                      >
+                        {teamPageEmptyMessage}
                       </Command.Item>
-                    ))
-                  ) : (
-                    <Command.Item
-                      value="teams:none"
-                      disabled
-                      className="flex items-center gap-3 px-3 py-2.5 mx-1 rounded-md cursor-default text-sm text-neutral-500 dark:text-neutral-400"
-                    >
-                      {teamPageEmptyMessage}
-                    </Command.Item>
-                  )}
-                </Command.Group>
-              </>
-            ) : null}
-          </Command.List>
-        </Command>
+                    )}
+                  </Command.Group>
+                </>
+              ) : null}
+            </Command.List>
+          </Command>
+        </div>
       </div>
-    </div>
-  </>
+    </>
   );
 }
-const buildNodePath = (root: HTMLElement, target: Node | null): number[] | null => {
+const buildNodePath = (
+  root: HTMLElement,
+  target: Node | null
+): number[] | null => {
   if (!target) return null;
   const path: number[] = [];
   let current: Node | null = target;
