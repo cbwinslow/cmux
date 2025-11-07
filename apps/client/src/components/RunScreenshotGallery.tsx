@@ -45,6 +45,12 @@ const STATUS_STYLES: Record<ScreenshotStatus, string> = {
     "bg-neutral-200/70 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300",
 };
 
+const getImageKey = (
+  setId: Id<"taskRunScreenshotSets">,
+  image: ScreenshotImage,
+  indexInSet: number,
+) => `${setId}:${image.storageId}:${indexInSet}`;
+
 export function RunScreenshotGallery(props: RunScreenshotGalleryProps) {
   const { screenshotSets, highlightedSetId } = props;
   const sortedScreenshotSets = useMemo(
@@ -75,7 +81,7 @@ export function RunScreenshotGallery(props: RunScreenshotGalleryProps) {
           set,
           image,
           indexInSet,
-          key: image.url as string,
+          key: getImageKey(set._id, image, indexInSet),
           globalIndex: entries.length,
         });
       });
@@ -91,12 +97,14 @@ export function RunScreenshotGallery(props: RunScreenshotGalleryProps) {
     return indexMap;
   }, [flattenedImages]);
 
-  const [activeImageIndex, setActiveImageIndex] = useState<number | null>(null);
+  const [activeImageKey, setActiveImageKey] = useState<string | null>(null);
 
+  const activeImageIndex =
+    activeImageKey !== null ? globalIndexByKey.get(activeImageKey) ?? null : null;
   const currentEntry =
     activeImageIndex !== null &&
-    activeImageIndex >= 0 &&
-    activeImageIndex < flattenedImages.length
+      activeImageIndex >= 0 &&
+      activeImageIndex < flattenedImages.length
       ? flattenedImages[activeImageIndex]
       : null;
 
@@ -107,51 +115,44 @@ export function RunScreenshotGallery(props: RunScreenshotGalleryProps) {
 
   const effectiveHighlight =
     highlightedSetId ??
-    currentEntry?.set._id ??
-    sortedScreenshotSets[sortedScreenshotSets.length - 1]?._id;
+    sortedScreenshotSets[sortedScreenshotSets.length - 1]?._id ?? null;
 
   useEffect(() => {
-    if (activeImageIndex === null) {
+    if (activeImageKey === null) {
       return;
     }
-    if (flattenedImages.length === 0) {
-      setActiveImageIndex(null);
-      return;
+    if (flattenedImages.length === 0 || !globalIndexByKey.has(activeImageKey)) {
+      setActiveImageKey(null);
     }
-    if (activeImageIndex >= flattenedImages.length) {
-      setActiveImageIndex(flattenedImages.length - 1);
-    }
-  }, [activeImageIndex, flattenedImages.length]);
+  }, [activeImageKey, flattenedImages.length, globalIndexByKey]);
 
   const closeSlideshow = useCallback(() => {
-    setActiveImageIndex(null);
+    setActiveImageKey(null);
   }, []);
 
   const goNext = useCallback(() => {
-    setActiveImageIndex((prev) => {
-      if (prev === null) {
-        return prev;
-      }
-      const len = flattenedImages.length;
-      if (len <= 1) {
-        return prev;
-      }
-      return (prev + 1) % len;
-    });
-  }, [flattenedImages.length]);
+    if (activeImageIndex === null) {
+      return;
+    }
+    const len = flattenedImages.length;
+    if (len <= 1) {
+      return;
+    }
+    const nextIndex = (activeImageIndex + 1) % len;
+    setActiveImageKey(flattenedImages[nextIndex]?.key ?? null);
+  }, [activeImageIndex, flattenedImages]);
 
   const goPrev = useCallback(() => {
-    setActiveImageIndex((prev) => {
-      if (prev === null) {
-        return prev;
-      }
-      const len = flattenedImages.length;
-      if (len <= 1) {
-        return prev;
-      }
-      return (prev - 1 + len) % len;
-    });
-  }, [flattenedImages.length]);
+    if (activeImageIndex === null) {
+      return;
+    }
+    const len = flattenedImages.length;
+    if (len <= 1) {
+      return;
+    }
+    const prevIndex = (activeImageIndex - 1 + len) % len;
+    setActiveImageKey(flattenedImages[prevIndex]?.key ?? null);
+  }, [activeImageIndex, flattenedImages]);
 
   const isSlideshowOpen = Boolean(currentEntry);
 
@@ -194,12 +195,11 @@ export function RunScreenshotGallery(props: RunScreenshotGalleryProps) {
           <Dialog.Root
             open={isSlideshowOpen}
             onOpenChange={(open) => !open && closeSlideshow()}
-            modal={false}
           >
             <Dialog.Portal>
-              <Dialog.Overlay className="pointer-events-none fixed inset-0 bg-neutral-950/70 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in data-[state=closed]:fade-out" />
-              <Dialog.Content className="pointer-events-none fixed inset-0 flex items-center justify-center p-6 focus:outline-none">
-                <div className="pointer-events-auto relative flex w-full max-w-5xl flex-col gap-3 rounded-2xl border border-neutral-200 bg-white/95 p-3 shadow-2xl backdrop-blur-md focus:outline-none dark:border-neutral-800 dark:bg-neutral-950/90 sm:p-5">
+              <Dialog.Overlay className="fixed inset-0 bg-neutral-950/70 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in data-[state=closed]:fade-out" />
+              <Dialog.Content className="fixed inset-0 flex items-center justify-center p-6 focus:outline-none">
+                <div className="relative flex w-full max-w-5xl flex-col gap-3 rounded-2xl border border-neutral-200 bg-white/95 p-3 shadow-2xl backdrop-blur-md focus:outline-none dark:border-neutral-800 dark:bg-neutral-950/90 sm:p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-1">
                       <Dialog.Title className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
@@ -275,7 +275,7 @@ export function RunScreenshotGallery(props: RunScreenshotGalleryProps) {
               className={cn(
                 "rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950/70 p-3 transition-shadow",
                 isHighlighted &&
-                  "border-emerald-400/70 dark:border-emerald-400/60 shadow-[0_0_0_1px_rgba(16,185,129,0.25)]"
+                "border-emerald-400/70 dark:border-emerald-400/60 shadow-[0_0_0_1px_rgba(16,185,129,0.25)]"
               )}
             >
               <div className="flex flex-wrap items-center gap-2">
@@ -315,35 +315,34 @@ export function RunScreenshotGallery(props: RunScreenshotGalleryProps) {
                   {set.error}
                 </p>
               )}
-                  {set.images.length > 0 ? (
+              {set.images.length > 0 ? (
                 <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
                   {set.images.map((image, indexInSet) => {
                     const displayName = image.fileName ?? "Screenshot";
+                    const stableKey = getImageKey(set._id, image, indexInSet);
                     if (!image.url) {
-                      const placeholderKey = `${set._id}:${image.storageId}:${indexInSet}`;
                       return (
                         <div
-                          key={placeholderKey}
+                          key={stableKey}
                           className="flex h-48 min-w-[200px] items-center justify-center rounded-lg border border-dashed border-neutral-300 bg-neutral-100 text-xs text-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400"
                         >
                           URL expired
                         </div>
                       );
                     }
-                    const imageKey = image.url;
-                    const flatIndex = globalIndexByKey.get(imageKey) ?? -1;
-                    const humanIndex = flatIndex >= 0 ? flatIndex + 1 : null;
+                    const flatIndex = globalIndexByKey.get(stableKey) ?? null;
+                    const humanIndex = flatIndex !== null ? flatIndex + 1 : null;
+                    const isActive = activeImageKey === stableKey;
 
                     return (
                       <button
-                        key={imageKey}
+                        key={stableKey}
                         type="button"
-                        onClick={() => setActiveImageIndex(flatIndex)}
+                        onClick={() => setActiveImageKey(stableKey)}
                         className={cn(
                           "group relative flex w-[220px] flex-col overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 text-left transition-colors hover:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-900/70 dark:hover:border-neutral-500",
-                          activeImageIndex !== null &&
-                            flatIndex === activeImageIndex &&
-                            "border-emerald-400/70 shadow-[0_0_0_1px_rgba(16,185,129,0.25)] dark:border-emerald-400/60",
+                          isActive &&
+                          "border-emerald-400/70 shadow-[0_0_0_1px_rgba(16,185,129,0.25)] dark:border-emerald-400/60",
                         )}
                         aria-label={`Open ${displayName} in slideshow`}
                       >
