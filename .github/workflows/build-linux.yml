@@ -1,0 +1,178 @@
+# .github/workflows/build-linux.yml
+name: Build Linux Packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+      - apps/client/package.json
+      - scripts/build-prod-linux.sh
+  pull_request:
+    paths:
+      - package.json
+      - apps/client/package.json
+      - scripts/build-prod-linux.sh
+
+concurrency:
+  group: build-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  linux-x64:
+    name: Linux x64 (AppImage, deb, rpm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.21
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          profile: minimal
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libssl-dev \
+            pkg-config \
+            libglib2.0-dev \
+            libpango1.0-dev \
+            libcairo2-dev \
+            libgdk-pixbuf2.0-dev \
+            libatk1.0-dev \
+            rpm
+
+      - name: Install dependencies (bun)
+        run: bun install --frozen-lockfile
+
+      - name: Write .env for build
+        run: |
+          cat > .env <<EOF
+          NEXT_PUBLIC_CONVEX_URL=${{ secrets.NEXT_PUBLIC_CONVEX_URL || 'https://example.convex.cloud' }}
+          NEXT_PUBLIC_STACK_PROJECT_ID=${{ secrets.NEXT_PUBLIC_STACK_PROJECT_ID || 'test' }}
+          NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY=${{ secrets.NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY || 'test' }}
+          NEXT_PUBLIC_WWW_ORIGIN=${{ secrets.NEXT_PUBLIC_WWW_ORIGIN || 'https://cmux.dev' }}
+          NEXT_PUBLIC_GITHUB_APP_SLUG=${{ secrets.NEXT_PUBLIC_GITHUB_APP_SLUG || 'cmux' }}
+          EOF
+
+      - name: Build native Rust addon
+        working-directory: apps/server/native/core
+        run: bunx --bun @napi-rs/cli build --platform --release
+
+      - name: Build Linux packages (x64)
+        run: bash scripts/build-prod-linux.sh --skip-install --arch x64
+
+      - name: List built artifacts
+        working-directory: apps/client/dist-electron
+        run: |
+          echo "Built artifacts:"
+          ls -lh *.{AppImage,deb,rpm} 2>/dev/null || echo "No packages found"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-packages
+          path: |
+            apps/client/dist-electron/*.AppImage
+            apps/client/dist-electron/*.deb
+            apps/client/dist-electron/*.rpm
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-arm64:
+    name: Linux arm64 (AppImage, deb, rpm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.21
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          profile: minimal
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Install system dependencies and cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libssl-dev \
+            pkg-config \
+            libglib2.0-dev \
+            libpango1.0-dev \
+            libcairo2-dev \
+            libgdk-pixbuf2.0-dev \
+            libatk1.0-dev \
+            rpm \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross
+
+      - name: Install dependencies (bun)
+        run: bun install --frozen-lockfile
+
+      - name: Write .env for build
+        run: |
+          cat > .env <<EOF
+          NEXT_PUBLIC_CONVEX_URL=${{ secrets.NEXT_PUBLIC_CONVEX_URL || 'https://example.convex.cloud' }}
+          NEXT_PUBLIC_STACK_PROJECT_ID=${{ secrets.NEXT_PUBLIC_STACK_PROJECT_ID || 'test' }}
+          NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY=${{ secrets.NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY || 'test' }}
+          NEXT_PUBLIC_WWW_ORIGIN=${{ secrets.NEXT_PUBLIC_WWW_ORIGIN || 'https://cmux.dev' }}
+          NEXT_PUBLIC_GITHUB_APP_SLUG=${{ secrets.NEXT_PUBLIC_GITHUB_APP_SLUG || 'cmux' }}
+          EOF
+
+      - name: Build native Rust addon (cross-compile)
+        working-directory: apps/server/native/core
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+        run: bunx --bun @napi-rs/cli build --target aarch64-unknown-linux-gnu --release
+
+      - name: Build Linux packages (arm64)
+        run: bash scripts/build-prod-linux.sh --skip-install --arch arm64
+
+      - name: List built artifacts
+        working-directory: apps/client/dist-electron
+        run: |
+          echo "Built artifacts:"
+          ls -lh *.{AppImage,deb,rpm} 2>/dev/null || echo "No packages found"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-packages
+          path: |
+            apps/client/dist-electron/*.AppImage
+            apps/client/dist-electron/*.deb
+            apps/client/dist-electron/*.rpm
+          if-no-files-found: error
+          retention-days: 30
