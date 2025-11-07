@@ -287,6 +287,9 @@ export function CommandBar({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [openedWithShift, setOpenedWithShift] = useState(false);
+  const clearCommandInput = useCallback(() => {
+    setSearch("");
+  }, [setSearch]);
   const [activePage, setActivePage] = useState<
     "root" | "teams" | "local-workspaces" | "cloud-workspaces"
   >("root");
@@ -405,10 +408,10 @@ export function CommandBar({
   }, []);
 
   const resetCommandState = useCallback(() => {
-    setSearch("");
+    clearCommandInput();
     setActivePage("root");
     setCommandValue(undefined);
-  }, []);
+  }, [clearCommandInput]);
 
   const scheduleCommandStateReset = useCallback(() => {
     if (stateResetDelayMs <= 0) {
@@ -438,7 +441,7 @@ export function CommandBar({
     skipNextCloseRef.current = false;
     if (search.length > 0) {
       skipNextCloseRef.current = true;
-      setSearch("");
+      clearCommandInput();
       return;
     }
     if (activePage !== "root") {
@@ -447,7 +450,7 @@ export function CommandBar({
       return;
     }
     closeCommand();
-  }, [activePage, closeCommand, search, setActivePage, setSearch]);
+  }, [activePage, clearCommandInput, closeCommand, search, setActivePage]);
 
   useEffect(() => {
     if (!open) return;
@@ -837,10 +840,11 @@ export function CommandBar({
 
   const handleLocalWorkspaceSelect = useCallback(
     (projectFullName: string) => {
+      clearCommandInput();
       closeCommand();
       void createLocalWorkspace(projectFullName);
     },
-    [closeCommand, createLocalWorkspace]
+    [clearCommandInput, closeCommand, createLocalWorkspace]
   );
 
   const createCloudWorkspaceFromEnvironment = useCallback(
@@ -1009,6 +1013,7 @@ export function CommandBar({
 
   const handleCloudWorkspaceSelect = useCallback(
     (option: CloudWorkspaceOption) => {
+      clearCommandInput();
       closeCommand();
       if (option.type === "environment") {
         void createCloudWorkspaceFromEnvironment(option.environmentId);
@@ -1017,6 +1022,7 @@ export function CommandBar({
       }
     },
     [
+      clearCommandInput,
       closeCommand,
       createCloudWorkspaceFromEnvironment,
       createCloudWorkspaceFromRepo,
@@ -1296,9 +1302,9 @@ export function CommandBar({
 
   const handleSelect = useCallback(
     async (value: string) => {
+      clearCommandInput();
       if (value === "teams:switch") {
         setActivePage("teams");
-        setSearch("");
         return;
       } else if (value === "new-task") {
         navigate({
@@ -1307,11 +1313,9 @@ export function CommandBar({
         });
       } else if (value === "local-workspaces") {
         setActivePage("local-workspaces");
-        setSearch("");
         return;
       } else if (value === "cloud-workspaces") {
         setActivePage("cloud-workspaces");
-        setSearch("");
         return;
       } else if (value === "pull-requests") {
         navigate({
@@ -1500,6 +1504,7 @@ export function CommandBar({
       closeCommand();
     },
     [
+      clearCommandInput,
       navigate,
       teamSlugOrId,
       setTheme,
@@ -2476,6 +2481,7 @@ export function CommandBar({
           "fixed inset-x-0 top-[230px] z-[var(--z-commandbar)] flex items-start justify-center pointer-events-none",
           open ? "opacity-100" : "opacity-0"
         )}
+        aria-hidden={!open}
       >
         <div
           className={`w-full max-w-2xl h-auto max-h-[475px] bg-white dark:bg-neutral-900 rounded-xl shadow-2xl border border-neutral-200 dark:border-neutral-700 overflow-hidden flex flex-col ${
@@ -2483,6 +2489,7 @@ export function CommandBar({
               ? "opacity-100 pointer-events-auto"
               : "opacity-0 pointer-events-none"
           }`}
+          aria-hidden={!open}
         >
           <Command
             value={commandValue}
