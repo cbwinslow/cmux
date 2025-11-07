@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  Join the Manaflow <a href="https://discord.gg/7VY58tftMg">Discord</a> to talk more about cmux!
+  Join the <a href="https://discord.gg/SDbQmzQhRK">Discord</a> to talk more about cmux!
 </p>
 
 cmux lets you spawn Claude Code, Codex CLI, Cursor CLI, Gemini CLI, Amp, Opencode, and other coding agent CLIs in parallel across multiple tasks.
