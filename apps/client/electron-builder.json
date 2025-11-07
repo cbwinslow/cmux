@@ -82,7 +82,24 @@
   },
   "linux": {
     "icon": "build/icon.png",
-    "category": "Development"
+    "category": "Development",
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": ["x64", "arm64"]
+      },
+      {
+        "target": "deb",
+        "arch": ["x64", "arm64"]
+      },
+      {
+        "target": "rpm",
+        "arch": ["x64", "arm64"]
+      }
+    ],
+    "maintainer": "cmux <support@cmux.dev>",
+    "synopsis": "Open source Claude Code manager",
+    "description": "cmux lets you spawn Claude Code, Codex CLI, Cursor CLI, Gemini CLI, Amp, Opencode, and other coding agent CLIs in parallel across multiple tasks."
   },
   "dmg": {
     "icon": "build/icon.icns",
