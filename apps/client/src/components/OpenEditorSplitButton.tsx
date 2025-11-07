@@ -1,5 +1,6 @@
 import { editorIcons } from "@/components/ui/dropdown-types";
 import { useSocket } from "@/contexts/socket/use-socket";
+import { isMac } from "@/lib/platform";
 import { Menu } from "@base-ui-components/react/menu";
 import clsx from "clsx";
 import { Check, ChevronDown } from "lucide-react";
@@ -44,7 +45,7 @@ export function OpenEditorSplitButton({
   }, [socket]);
 
   const menuItems = useMemo(() => {
-    const isMac = typeof navigator !== 'undefined' && navigator.platform?.toLowerCase().includes('mac');
+    const platformIsMac = isMac();
     return [
       {
         id: "vscode" as const,
@@ -63,7 +64,7 @@ export function OpenEditorSplitButton({
       },
       {
         id: "finder" as const,
-        name: isMac ? "Finder" : "File Manager",
+        name: platformIsMac ? "Finder" : "File Manager",
         enabled: !!worktreePath && (availableEditors?.finder ?? true),
       },
       {

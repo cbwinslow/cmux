@@ -1,4 +1,5 @@
 import { useSocket } from "@/contexts/socket/use-socket";
+import { isMac } from "@/lib/platform";
 import { ChevronDown, ExternalLink } from "lucide-react";
 import { useEffect, useRef, useState, useMemo } from "react";
 
@@ -33,8 +34,7 @@ export function OpenInEditorButton({ workspacePath }: OpenInEditorButtonProps) {
       items.push({ id: "windsurf", name: "Windsurf" });
     if (availableEditors?.finder) {
       // Show platform-appropriate name for file manager
-      const isMac = navigator.platform?.toLowerCase().includes('mac');
-      items.push({ id: "finder", name: isMac ? "Finder" : "File Manager" });
+      items.push({ id: "finder", name: isMac() ? "Finder" : "File Manager" });
     }
     if (availableEditors?.iterm)
       items.push({ id: "iterm", name: "iTerm" });

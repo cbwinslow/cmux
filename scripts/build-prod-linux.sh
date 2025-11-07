@@ -185,7 +185,15 @@ if [[ "$SKIP_INSTALL" != "true" ]]; then
 fi
 
 start_step "Build native addon (release)"
-(cd "$ROOT_DIR/apps/server/native/core" && bunx --bun @napi-rs/cli build --platform --release)
+# Use architecture-specific targets for cross-compilation
+if [[ "$ARCH" == "arm64" ]]; then
+  (cd "$ROOT_DIR/apps/server/native/core" && bunx --bun @napi-rs/cli build --target aarch64-unknown-linux-gnu --release)
+elif [[ "$ARCH" == "x64" ]]; then
+  (cd "$ROOT_DIR/apps/server/native/core" && bunx --bun @napi-rs/cli build --target x86_64-unknown-linux-gnu --release)
+else
+  # For 'all', build natively for the host platform (each arch will be built in separate jobs)
+  (cd "$ROOT_DIR/apps/server/native/core" && bunx --bun @napi-rs/cli build --platform --release)
+fi
 end_step
 
 start_step "Build Electron app"

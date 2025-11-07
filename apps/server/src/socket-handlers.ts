@@ -369,16 +369,67 @@ export function setupSocketHandlers(
         }
       };
 
+      // Find the first available Linux file manager
+      const findLinuxFileManager = async (): Promise<string | null> => {
+        if (process.platform !== "linux") return null;
+        const managers = ["nautilus", "dolphin", "thunar", "nemo", "caja", "pcmanfm"];
+        
+        const results = await Promise.all(
+          managers.map(async (manager) => ({
+            manager,
+            exists: await commandExists(manager)
+          }))
+        );
+        
+        const available = results.find(r => r.exists);
+        if (available) return available.manager;
+        
+        // Fallback to xdg-open
+        if (await commandExists("xdg-open")) return "xdg-open";
+        return null;
+      };
+
+      // Find the first available Linux terminal with its command format
+      const findLinuxTerminal = async (): Promise<{ cmd: string; args: (path: string) => string[] } | null> => {
+        if (process.platform !== "linux") return null;
+        
+        const terminals = [
+          { cmd: "gnome-terminal", args: (path: string) => ["--working-directory=" + path] },
+          { cmd: "konsole", args: (path: string) => ["--workdir", path] },
+          { cmd: "xfce4-terminal", args: (path: string) => ["--working-directory=" + path] },
+          { cmd: "tilix", args: (path: string) => ["--working-directory=" + path] },
+          { cmd: "terminator", args: (path: string) => ["--working-directory=" + path] },
+          { cmd: "xterm", args: () => [] },
+        ];
+        
+        const results = await Promise.all(
+          terminals.map(async (terminal) => ({
+            ...terminal,
+            exists: await commandExists(terminal.cmd)
+          }))
+        );
+        
+        const available = results.find(r => r.exists);
+        return available ? { cmd: available.cmd, args: available.args } : null;
+      };
+
       // Check for Linux-specific file managers
       const linuxFileManagerExists = async () => {
         if (process.platform !== "linux") return false;
-        // Check for common Linux file managers
+        // Check for common Linux file managers concurrently
         const managers = ["nautilus", "dolphin", "thunar", "nemo", "caja", "pcmanfm"];
-        for (const manager of managers) {
-          if (await commandExists(manager)) {
-            return true;
-          }
+        const results = await Promise.all(
+          managers.map(async (manager) => ({
+            manager,
+            exists: await commandExists(manager)
+          }))
+        );
+        
+        // Return true if any manager is available
+        if (results.some(r => r.exists)) {
+          return true;
         }
+        
         // Check if xdg-open is available (fallback)
         return await commandExists("xdg-open");
       };
@@ -387,12 +438,10 @@ export function setupSocketHandlers(
       const linuxTerminalExists = async () => {
         if (process.platform !== "linux") return false;
         const terminals = ["gnome-terminal", "konsole", "xfce4-terminal", "xterm", "tilix", "terminator"];
-        for (const terminal of terminals) {
-          if (await commandExists(terminal)) {
-            return true;
-          }
-        }
-        return false;
+        const results = await Promise.all(
+          terminals.map(terminal => commandExists(terminal))
+        );
+        return results.some(exists => exists);
       };
 
       const [
@@ -1455,33 +1504,11 @@ export function setupSocketHandlers(
               // Use macOS 'open' to open the folder in Finder
               command = ["open", path];
             } else if (process.platform === "linux") {
-              // Try common Linux file managers
-              const fileManagers = [
-                "nautilus",    // GNOME/Ubuntu
-                "dolphin",     // KDE/Kubuntu
-                "thunar",      // XFCE/Xubuntu
-                "nemo",        // Cinnamon/Linux Mint
-                "caja",        // MATE
-                "pcmanfm",     // LXDE
-              ];
-              
-              // Find first available file manager
-              let found = false;
-              for (const fm of fileManagers) {
-                try {
-                  await execAsync(`command -v ${fm}`);
-                  command = [fm, path];
-                  found = true;
-                  break;
-                } catch {
-                  continue;
-                }
+              const fileManager = await findLinuxFileManager();
+              if (!fileManager) {
+                throw new Error("No file manager found on Linux");
               }
-              
-              // Fallback to xdg-open
-              if (!found) {
-                command = ["xdg-open", path];
-              }
+              command = [fileManager, path];
             } else {
               throw new Error("File manager is only supported on macOS and Linux");
             }
@@ -1498,42 +1525,11 @@ export function setupSocketHandlers(
             if (process.platform === "darwin") {
               command = ["open", "-a", "Terminal", path];
             } else if (process.platform === "linux") {
-              // Try common Linux terminal emulators
-              const terminals = [
-                "gnome-terminal",   // GNOME/Ubuntu
-                "konsole",          // KDE/Kubuntu
-                "xfce4-terminal",   // XFCE/Xubuntu
-                "tilix",            // Alternative for GNOME
-                "terminator",       // Cross-desktop
-                "xterm",            // Fallback
-              ];
-              
-              let found = false;
-              for (const term of terminals) {
-                try {
-                  await execAsync(`command -v ${term}`);
-                  // Different terminals have different argument formats
-                  if (term === "gnome-terminal") {
-                    command = [term, "--working-directory=" + path];
-                  } else if (term === "konsole") {
-                    command = [term, "--workdir", path];
-                  } else if (term === "xfce4-terminal") {
-                    command = [term, "--working-directory=" + path];
-                  } else if (term === "tilix" || term === "terminator") {
-                    command = [term, "--working-directory=" + path];
-                  } else {
-                    command = [term];
-                  }
-                  found = true;
-                  break;
-                } catch {
-                  continue;
-                }
-              }
-              
-              if (!found) {
+              const terminal = await findLinuxTerminal();
+              if (!terminal) {
                 throw new Error("No supported terminal emulator found on Linux");
               }
+              command = [terminal.cmd, ...terminal.args(path)];
             } else {
               throw new Error("Terminal is only supported on macOS and Linux");
             }
