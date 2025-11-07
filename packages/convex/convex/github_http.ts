@@ -1,7 +1,7 @@
 "use node";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { action } from "./_generated/server";
 import { Octokit } from "octokit";
 import { parseGithubRepoUrl } from "@cmux/shared";
@@ -12,7 +12,7 @@ export const addManualRepo = action({
     teamSlugOrId: v.string(),
     repoUrl: v.string(),
   },
-  handler: async (ctx, { teamSlugOrId, repoUrl }): Promise<{ success: true; repoId: Id<"repos">; fullName: string }> => {
+  handler: async (ctx, { teamSlugOrId, repoUrl }): Promise<{ success: boolean; repoId: Id<"repos">; fullName: string }> => {
     // Parse the repo URL
     const parsed = parseGithubRepoUrl(repoUrl);
     if (!parsed) {
@@ -43,6 +43,9 @@ export const addManualRepo = action({
       if (!identity) {
         throw new Error("Not authenticated");
       }
+
+      // Verify team access by calling an authQuery (this will throw if user is not a team member)
+      await ctx.runQuery(api.github.hasReposForTeam, { teamSlugOrId });
 
       // Check if repo already exists
       const existing: Doc<"repos"> | null = await ctx.runQuery(internal.github.getRepoByFullNameInternal, {

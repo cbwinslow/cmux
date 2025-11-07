@@ -723,7 +723,7 @@ function DashboardComponent() {
       } catch (error) {
         // Only show error toast for non-validation errors
         // Validation errors mean it's not a GitHub URL, so just return false
-        if (error instanceof Error && !error.message.includes("Invalid GitHub")) {
+        if (error instanceof Error && error.message && !error.message.includes("Invalid GitHub")) {
           toast.error(error.message);
         }
         return false; // Don't close dropdown if it's not a valid GitHub URL
