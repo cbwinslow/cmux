@@ -139,7 +139,7 @@ export function useOpenWithActions({
       },
       {
         id: "finder",
-        name: "Finder",
+        name: typeof navigator !== 'undefined' && navigator.platform?.toLowerCase().includes('mac') ? "Finder" : "File Manager",
         enabled: Boolean(worktreePath) && (availableEditors?.finder ?? true),
       },
       {

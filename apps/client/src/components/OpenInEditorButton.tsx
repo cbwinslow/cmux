@@ -31,8 +31,11 @@ export function OpenInEditorButton({ workspacePath }: OpenInEditorButtonProps) {
       items.push({ id: "vscode", name: "VS Code" });
     if (availableEditors?.windsurf ?? true)
       items.push({ id: "windsurf", name: "Windsurf" });
-    if (availableEditors?.finder)
-      items.push({ id: "finder", name: "Finder" });
+    if (availableEditors?.finder) {
+      // Show platform-appropriate name for file manager
+      const isMac = navigator.platform?.toLowerCase().includes('mac');
+      items.push({ id: "finder", name: isMac ? "Finder" : "File Manager" });
+    }
     if (availableEditors?.iterm)
       items.push({ id: "iterm", name: "iTerm" });
     if (availableEditors?.terminal)
