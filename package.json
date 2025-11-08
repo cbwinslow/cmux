@@ -48,6 +48,7 @@
     "generate-routes": "cd apps/client && bun run generate-routes",
     "generate-openapi-client": "cd apps/www && bun run generate-openapi-client",
     "build:mac-arm64-prod": "bash scripts/build-prod-mac-arm64.sh",
+    "build:linux-prod": "bash scripts/build-prod-linux.sh",
     "convex:deploy:prod": "(cd packages/convex && bun run deploy:prod)"
   },
   "type": "module",

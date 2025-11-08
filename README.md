@@ -24,11 +24,48 @@ Every run spins up an isolated VS Code workspace either in the cloud or in a loc
 
 ## Install
 
-cmux supports macOS. Linux and Windows support coming soon.
+cmux supports macOS and Linux (Ubuntu, Fedora, Debian). Windows support coming soon.
+
+### macOS
 
 <a href="https://www.cmux.dev/direct-download-macos">
   <img src="./docs/assets/macos-badge.png" alt="Download cmux for macOS" width="180" />
 </a>
+
+### Linux
+
+cmux supports major Linux distributions including Ubuntu, Fedora, and Debian.
+
+**Download Pre-built Packages:**
+- **AppImage** (Universal): Works on all Linux distributions
+- **Debian/Ubuntu** (.deb): For Debian-based distributions
+- **Fedora/RHEL** (.rpm): For Red Hat-based distributions
+
+Download the appropriate package from the [releases page](https://github.com/cbwinslow/cmux/releases).
+
+**Installing:**
+
+```bash
+# AppImage (all distributions)
+chmod +x cmux-*.AppImage
+./cmux-*.AppImage
+
+# Debian/Ubuntu
+sudo dpkg -i cmux-*.deb
+# or
+sudo apt install ./cmux-*.deb
+
+# Fedora/RHEL
+sudo rpm -i cmux-*.rpm
+# or
+sudo dnf install cmux-*.rpm
+```
+
+**System Requirements:**
+- Docker (required for local development environments)
+- VS Code, Cursor, or Windsurf (optional, for opening projects)
+- A supported terminal emulator (gnome-terminal, konsole, xfce4-terminal, etc.)
+
 
 <!-- ```bash
 # with bun

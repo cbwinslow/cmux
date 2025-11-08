@@ -369,6 +369,81 @@ export function setupSocketHandlers(
         }
       };
 
+      // Find the first available Linux file manager
+      const findLinuxFileManager = async (): Promise<string | null> => {
+        if (process.platform !== "linux") return null;
+        const managers = ["nautilus", "dolphin", "thunar", "nemo", "caja", "pcmanfm"];
+        
+        const results = await Promise.all(
+          managers.map(async (manager) => ({
+            manager,
+            exists: await commandExists(manager)
+          }))
+        );
+        
+        const available = results.find(r => r.exists);
+        if (available) return available.manager;
+        
+        // Fallback to xdg-open
+        if (await commandExists("xdg-open")) return "xdg-open";
+        return null;
+      };
+
+      // Find the first available Linux terminal with its command format
+      const findLinuxTerminal = async (): Promise<{ cmd: string; args: (path: string) => string[] } | null> => {
+        if (process.platform !== "linux") return null;
+        
+        const terminals = [
+          { cmd: "gnome-terminal", args: (path: string) => ["--working-directory=" + path] },
+          { cmd: "konsole", args: (path: string) => ["--workdir", path] },
+          { cmd: "xfce4-terminal", args: (path: string) => ["--working-directory=" + path] },
+          { cmd: "tilix", args: (path: string) => ["--working-directory=" + path] },
+          { cmd: "terminator", args: (path: string) => ["--working-directory=" + path] },
+          { cmd: "xterm", args: () => [] },
+        ];
+        
+        const results = await Promise.all(
+          terminals.map(async (terminal) => ({
+            ...terminal,
+            exists: await commandExists(terminal.cmd)
+          }))
+        );
+        
+        const available = results.find(r => r.exists);
+        return available ? { cmd: available.cmd, args: available.args } : null;
+      };
+
+      // Check for Linux-specific file managers
+      const linuxFileManagerExists = async () => {
+        if (process.platform !== "linux") return false;
+        // Check for common Linux file managers concurrently
+        const managers = ["nautilus", "dolphin", "thunar", "nemo", "caja", "pcmanfm"];
+        const results = await Promise.all(
+          managers.map(async (manager) => ({
+            manager,
+            exists: await commandExists(manager)
+          }))
+        );
+        
+        // Return true if any manager is available
+        if (results.some(r => r.exists)) {
+          return true;
+        }
+        
+        // Check if xdg-open is available (fallback)
+        return await commandExists("xdg-open");
+      };
+
+      // Check for Linux terminal emulators
+      const linuxTerminalExists = async () => {
+        if (process.platform !== "linux") return false;
+        const terminals = ["gnome-terminal", "konsole", "xfce4-terminal", "xterm", "tilix", "terminator"];
+        const results = await Promise.all(
+          terminals.map(terminal => commandExists(terminal))
+        );
+        return results.some(exists => exists);
+      };
+
       const [
         vscodeExists,
         cursorExists,
@@ -379,6 +454,8 @@ export function setupSocketHandlers(
         ghosttyApp,
         alacrittyExists,
         xcodeExists,
+        linuxFileManager,
+        linuxTerminal,
       ] = await Promise.all([
         commandExists("code"),
         commandExists("cursor"),
@@ -389,15 +466,17 @@ export function setupSocketHandlers(
         appExists("Ghostty"),
         commandExists("alacritty"),
         appExists("Xcode"),
+        linuxFileManagerExists(),
+        linuxTerminalExists(),
       ]);
 
       const availability: AvailableEditors = {
         vscode: vscodeExists,
         cursor: cursorExists,
         windsurf: windsurfExists,
-        finder: process.platform === "darwin",
+        finder: process.platform === "darwin" || linuxFileManager,
         iterm: itermExists,
-        terminal: terminalExists,
+        terminal: terminalExists || linuxTerminal,
         ghostty: ghosttyCommand || ghosttyApp,
         alacritty: alacrittyExists,
         xcode: xcodeExists,
@@ -1421,27 +1500,56 @@ export function setupSocketHandlers(
             command = ["windsurf", path];
             break;
           case "finder": {
-            if (process.platform !== "darwin") {
-              throw new Error("Finder is only supported on macOS");
+            if (process.platform === "darwin") {
+              // Use macOS 'open' to open the folder in Finder
+              command = ["open", path];
+            } else if (process.platform === "linux") {
+              const fileManager = await findLinuxFileManager();
+              if (!fileManager) {
+                throw new Error("No file manager found on Linux");
+              }
+              command = [fileManager, path];
+            } else {
+              throw new Error("File manager is only supported on macOS and Linux");
             }
-            // Use macOS 'open' to open the folder in Finder
-            command = ["open", path];
             break;
           }
           case "iterm":
-            command = ["open", "-a", "iTerm", path];
+            if (process.platform === "darwin") {
+              command = ["open", "-a", "iTerm", path];
+            } else {
+              throw new Error("iTerm is only supported on macOS");
+            }
             break;
           case "terminal":
-            command = ["open", "-a", "Terminal", path];
+            if (process.platform === "darwin") {
+              command = ["open", "-a", "Terminal", path];
+            } else if (process.platform === "linux") {
+              const terminal = await findLinuxTerminal();
+              if (!terminal) {
+                throw new Error("No supported terminal emulator found on Linux");
+              }
+              command = [terminal.cmd, ...terminal.args(path)];
+            } else {
+              throw new Error("Terminal is only supported on macOS and Linux");
+            }
             break;
           case "ghostty":
-            command = ["open", "-a", "Ghostty", path];
+            if (process.platform === "darwin") {
+              command = ["open", "-a", "Ghostty", path];
+            } else {
+              command = ["ghostty"];
+            }
             break;
           case "alacritty":
             command = ["alacritty", "--working-directory", path];
             break;
           case "xcode":
-            command = ["open", "-a", "Xcode", path];
+            if (process.platform === "darwin") {
+              command = ["open", "-a", "Xcode", path];
+            } else {
+              throw new Error("Xcode is only supported on macOS");
+            }
             break;
           default:
             throw new Error(`Unknown editor: ${editor}`);

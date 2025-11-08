@@ -1,5 +1,6 @@
 import { editorIcons } from "@/components/ui/dropdown-types";
 import { useSocket } from "@/contexts/socket/use-socket";
+import { isMac } from "@/lib/platform";
 import { Menu } from "@base-ui-components/react/menu";
 import clsx from "clsx";
 import { Check, ChevronDown } from "lucide-react";
@@ -43,55 +44,56 @@ export function OpenEditorSplitButton({
     };
   }, [socket]);
 
-  const menuItems = useMemo(
-    () =>
-      [
-        {
-          id: "vscode" as const,
-          name: "VS Code",
-          enabled: !!worktreePath && (availableEditors?.vscode ?? true),
-        },
-        {
-          id: "cursor" as const,
-          name: "Cursor",
-          enabled: !!worktreePath && (availableEditors?.cursor ?? true),
-        },
-        {
-          id: "windsurf" as const,
-          name: "Windsurf",
-          enabled: !!worktreePath && (availableEditors?.windsurf ?? true),
-        },
-        {
-          id: "finder" as const,
-          name: "Finder",
-          enabled: !!worktreePath && (availableEditors?.finder ?? true),
-        },
-        {
-          id: "iterm" as const,
-          name: "iTerm",
-          enabled: !!worktreePath && (availableEditors?.iterm ?? false),
-        },
-        {
-          id: "terminal" as const,
-          name: "Terminal",
-          enabled: !!worktreePath && (availableEditors?.terminal ?? false),
-        },
-        {
-          id: "ghostty" as const,
-          name: "Ghostty",
-          enabled: !!worktreePath && (availableEditors?.ghostty ?? false),
-        },
-        {
-          id: "alacritty" as const,
-          name: "Alacritty",
-          enabled: !!worktreePath && (availableEditors?.alacritty ?? false),
-        },
-        {
-          id: "xcode" as const,
-          name: "Xcode",
-          enabled: !!worktreePath && (availableEditors?.xcode ?? false),
-        },
-      ].filter((item) => item.enabled),
+  const menuItems = useMemo(() => {
+    const platformIsMac = isMac();
+    return [
+      {
+        id: "vscode" as const,
+        name: "VS Code",
+        enabled: !!worktreePath && (availableEditors?.vscode ?? true),
+      },
+      {
+        id: "cursor" as const,
+        name: "Cursor",
+        enabled: !!worktreePath && (availableEditors?.cursor ?? true),
+      },
+      {
+        id: "windsurf" as const,
+        name: "Windsurf",
+        enabled: !!worktreePath && (availableEditors?.windsurf ?? true),
+      },
+      {
+        id: "finder" as const,
+        name: platformIsMac ? "Finder" : "File Manager",
+        enabled: !!worktreePath && (availableEditors?.finder ?? true),
+      },
+      {
+        id: "iterm" as const,
+        name: "iTerm",
+        enabled: !!worktreePath && (availableEditors?.iterm ?? false),
+      },
+      {
+        id: "terminal" as const,
+        name: "Terminal",
+        enabled: !!worktreePath && (availableEditors?.terminal ?? false),
+      },
+      {
+        id: "ghostty" as const,
+        name: "Ghostty",
+        enabled: !!worktreePath && (availableEditors?.ghostty ?? false),
+      },
+      {
+        id: "alacritty" as const,
+        name: "Alacritty",
+        enabled: !!worktreePath && (availableEditors?.alacritty ?? false),
+      },
+      {
+        id: "xcode" as const,
+        name: "Xcode",
+        enabled: !!worktreePath && (availableEditors?.xcode ?? false),
+      },
+    ].filter((item) => item.enabled);
+  },
     [worktreePath, availableEditors]
   );
 

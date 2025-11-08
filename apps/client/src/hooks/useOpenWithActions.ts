@@ -1,6 +1,7 @@
 import { useSocket } from "@/contexts/socket/use-socket";
 import type { Doc } from "@cmux/convex/dataModel";
 import { editorIcons, type EditorType } from "@/components/ui/dropdown-types";
+import { isMac } from "@/lib/platform";
 import { useCallback, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { rewriteLocalWorkspaceUrlIfNeeded } from "@/lib/toProxyWorkspaceUrl";
@@ -139,7 +140,7 @@ export function useOpenWithActions({
       },
       {
         id: "finder",
-        name: "Finder",
+        name: isMac() ? "Finder" : "File Manager",
         enabled: Boolean(worktreePath) && (availableEditors?.finder ?? true),
       },
       {
