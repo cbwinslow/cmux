@@ -637,6 +637,20 @@ export type CloudRepoConfigBody = {
     envVarsContent?: string;
 };
 
+export type WorkspaceConfigResponse = {
+    projectFullName: string;
+    maintenanceScript?: string;
+    envVarsContent: string;
+    updatedAt?: number;
+} | null;
+
+export type WorkspaceConfigBody = {
+    teamSlugOrId: string;
+    projectFullName: string;
+    maintenanceScript?: string;
+    envVarsContent?: string;
+};
+
 export type GetApiHealthData = {
     body?: never;
     path?: never;
@@ -2351,6 +2365,59 @@ export type PostApiCloudRepoConfigsResponses = {
 };
 
 export type PostApiCloudRepoConfigsResponse = PostApiCloudRepoConfigsResponses[keyof PostApiCloudRepoConfigsResponses];
+
+export type GetApiWorkspaceConfigsData = {
+    body?: never;
+    path?: never;
+    query: {
+        teamSlugOrId: string;
+        projectFullName: string;
+    };
+    url: '/api/workspace-configs';
+};
+
+export type GetApiWorkspaceConfigsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type GetApiWorkspaceConfigsResponses = {
+    /**
+     * Configuration retrieved
+     */
+    200: WorkspaceConfigResponse;
+};
+
+export type GetApiWorkspaceConfigsResponse = GetApiWorkspaceConfigsResponses[keyof GetApiWorkspaceConfigsResponses];
+
+export type PostApiWorkspaceConfigsData = {
+    body: WorkspaceConfigBody;
+    path?: never;
+    query?: never;
+    url: '/api/workspace-configs';
+};
+
+export type PostApiWorkspaceConfigsErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type PostApiWorkspaceConfigsResponses = {
+    /**
+     * Configuration saved
+     */
+    200: WorkspaceConfigResponse;
+};
+
+export type PostApiWorkspaceConfigsResponse = PostApiWorkspaceConfigsResponses[keyof PostApiWorkspaceConfigsResponses];
 
 export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});

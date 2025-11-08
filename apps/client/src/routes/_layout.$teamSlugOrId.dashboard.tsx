@@ -8,8 +8,7 @@ import { DashboardStartTaskButton } from "@/components/dashboard/DashboardStartT
 import { TaskList } from "@/components/dashboard/TaskList";
 import { WorkspaceCreationButtons } from "@/components/dashboard/WorkspaceCreationButtons";
 import { FloatingPane } from "@/components/floating-pane";
-import { LocalWorkspaceSetupPanel } from "@/components/LocalWorkspaceSetupPanel";
-import { CloudRepoSetupPanel } from "@/components/CloudRepoSetupPanel";
+import { WorkspaceSetupPanel } from "@/components/WorkspaceSetupPanel";
 import { GitHubIcon } from "@/components/icons/github";
 import { useTheme } from "@/components/theme/use-theme";
 import { TitleBar } from "@/components/TitleBar";
@@ -647,10 +646,7 @@ function DashboardComponent() {
     return selectedProject[0];
   }, [selectedProject, isEnvSelected]);
 
-  const shouldShowCloudRepoSetup =
-    !!selectedRepoFullName && isCloudMode && !isEnvSelected;
-  const shouldShowLocalWorkspaceSetup =
-    !!selectedRepoFullName && !isCloudMode && !isEnvSelected;
+  const shouldShowWorkspaceSetup = !!selectedRepoFullName && !isEnvSelected;
 
   // const shouldShowCloudRepoOnboarding =
   //   !!selectedRepoFullName && isCloudMode && !isEnvSelected && !hasDismissedCloudRepoOnboarding;
@@ -916,17 +912,11 @@ function DashboardComponent() {
               canSubmit={canSubmit}
               onStartTask={handleStartTask}
             />
-            {shouldShowCloudRepoSetup ? (
-              <CloudRepoSetupPanel
+            {shouldShowWorkspaceSetup ? (
+              <WorkspaceSetupPanel
                 teamSlugOrId={teamSlugOrId}
                 projectFullName={selectedRepoFullName}
-              />
-            ) : null}
-
-            {shouldShowLocalWorkspaceSetup ? (
-              <LocalWorkspaceSetupPanel
-                teamSlugOrId={teamSlugOrId}
-                projectFullName={selectedRepoFullName}
+                mode={isCloudMode ? "cloud" : "local"}
               />
             ) : null}
 
