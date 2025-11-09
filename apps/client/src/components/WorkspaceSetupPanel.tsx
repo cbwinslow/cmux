@@ -5,7 +5,7 @@ import {
   getApiWorkspaceConfigsOptions,
   postApiWorkspaceConfigsMutation,
 } from "@cmux/www-openapi-client/react-query";
-import { useMutation as useRQMutation, useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation as useRQMutation } from "@tanstack/react-query";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
 import {
   useCallback,
@@ -16,6 +16,7 @@ import {
   type ClipboardEvent,
 } from "react";
 import { toast } from "sonner";
+import { Button } from "./ui/button";
 
 type WorkspaceSetupPanelProps = {
   teamSlugOrId: string;
@@ -234,7 +235,6 @@ export function WorkspaceSetupPanel({
           clipPath: isExpanded
             ? 'inset(0 0 0 0)'
             : 'inset(0 0 100% 0)',
-          transition: 'clip-path 300ms ease-in-out, border-color 300ms ease-in-out',
         }}
       />
       <button
@@ -255,22 +255,18 @@ export function WorkspaceSetupPanel({
           {isConfigured ? (
             <Check className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-400" />
           ) : (
-            <AlertTriangle className="w-3.5 h-3.5" />
+            <AlertTriangle className="w-3.5 h-3.5 text-orange-600 dark:text-orange-500" />
           )}
         </div>
       </button>
 
       <div
         className={`overflow-hidden ${isExpanded ? "max-h-[2000px]" : "max-h-0"}`}
-        style={{
-          transition: 'max-height 300ms ease-in-out',
-        }}
       >
         <div
           style={{
             clipPath: isExpanded ? 'inset(0 0 0 0)' : 'inset(0 0 100% 0)',
             opacity: isExpanded ? 1 : 0,
-            transition: 'clip-path 300ms ease-in-out, opacity 300ms ease-in-out',
           }}
         >
           <div className="pl-[30px] pr-2 pb-1">
@@ -408,14 +404,15 @@ export function WorkspaceSetupPanel({
                         All changes saved
                       </span>
                     ) : null}
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 rounded-md bg-neutral-900 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-neutral-800 disabled:opacity-60 disabled:hover:bg-neutral-900 dark:bg-blue-600 dark:hover:bg-blue-700 dark:disabled:hover:bg-blue-600"
-                      disabled={!hasChanges || saveMutation.isPending}
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="!h-7 focus-visible:ring-offset-1 focus-visible:ring-offset-white dark:focus-visible:ring-offset-neutral-900"
                       onClick={handleSave}
+                      disabled={!hasChanges || saveMutation.isPending}
                     >
                       {saveMutation.isPending ? "Saving…" : "Save setup"}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -423,6 +420,6 @@ export function WorkspaceSetupPanel({
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 }
