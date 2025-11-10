@@ -144,6 +144,7 @@ export function WorkspaceSetupPanel({
   const isConfigured =
     originalConfigRef.current.script.length > 0 ||
     originalConfigRef.current.envContent.length > 0;
+  const shouldShowSetupWarning = !configQuery.isPending && !isConfigured;
 
   const handleSave = useCallback(() => {
     if (!projectFullName) return;
@@ -253,10 +254,10 @@ export function WorkspaceSetupPanel({
             Configure workspace for{" "}
             <span className="font-semibold">{projectFullName}</span>
           </span>
-          {!isConfigured ? (
+          {shouldShowSetupWarning ? (
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>
-                <span className="inline-flex">
+                <span className="inline-flex animate-in fade-in-0 duration-300">
                   <AlertTriangle
                     className="w-3.5 h-3.5 text-orange-600 dark:text-orange-500"
                     aria-label="Workspace setup incomplete"
