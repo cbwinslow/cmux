@@ -8,6 +8,7 @@ import { DashboardStartTaskButton } from "@/components/dashboard/DashboardStartT
 import { TaskList } from "@/components/dashboard/TaskList";
 import { WorkspaceCreationButtons } from "@/components/dashboard/WorkspaceCreationButtons";
 import { FloatingPane } from "@/components/floating-pane";
+import { WorkspaceSetupPanel } from "@/components/WorkspaceSetupPanel";
 import { GitHubIcon } from "@/components/icons/github";
 import { useTheme } from "@/components/theme/use-theme";
 import { TitleBar } from "@/components/TitleBar";
@@ -22,16 +23,15 @@ import { useSocket } from "@/contexts/socket/use-socket";
 import { createFakeConvexId } from "@/lib/fakeConvexId";
 import { attachTaskLifecycleListeners } from "@/lib/socket/taskLifecycleListeners";
 import { branchesQueryOptions } from "@/queries/branches";
-import { clearEnvironmentDraft } from "@/state/environment-draft-store";
 import { api } from "@cmux/convex/api";
 import type { Doc, Id } from "@cmux/convex/dataModel";
-import type { MorphSnapshotId, ProviderStatusResponse, TaskAcknowledged, TaskError, TaskStarted } from "@cmux/shared";
+import type { ProviderStatusResponse, TaskAcknowledged, TaskError, TaskStarted } from "@cmux/shared";
 import { AGENT_CONFIGS } from "@cmux/shared/agentConfig";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useAction, useMutation } from "convex/react";
-import { Info, Server as ServerIcon } from "lucide-react";
+import { Server as ServerIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -39,15 +39,6 @@ import { z } from "zod";
 export const Route = createFileRoute("/_layout/$teamSlugOrId/dashboard")({
   component: DashboardComponent,
 });
-
-type EnvironmentNewSearchParams = {
-  step: "select" | "configure" | undefined;
-  selectedRepos: string[] | undefined;
-  instanceId: string | undefined;
-  connectionLogin: string | undefined;
-  repoSearch: string | undefined;
-  snapshotId: MorphSnapshotId | undefined;
-};
 
 // Default agents (not persisted to localStorage)
 const DEFAULT_AGENTS = [
@@ -123,12 +114,13 @@ function DashboardComponent() {
     const stored = localStorage.getItem("isCloudMode");
     return stored ? JSON.parse(stored) : true;
   });
-  const [hasDismissedCloudRepoOnboarding, setHasDismissedCloudRepoOnboarding] =
-    useState(false);
 
   const [, setDockerReady] = useState<boolean | null>(null);
   const [providerStatus, setProviderStatus] =
     useState<ProviderStatusResponse | null>(null);
+
+  // const [hasDismissedCloudRepoOnboarding, setHasDismissedCloudRepoOnboarding] =
+  //   useState<boolean>(false);
 
   // Ref to access editor API
   const editorApiRef = useRef<EditorApi | null>(null);
@@ -654,48 +646,26 @@ function DashboardComponent() {
     return selectedProject[0];
   }, [selectedProject, isEnvSelected]);
 
-  useEffect(() => {
-    setHasDismissedCloudRepoOnboarding(false);
-  }, [selectedRepoFullName]);
+  const shouldShowWorkspaceSetup = !!selectedRepoFullName && !isEnvSelected;
 
-  const selectedRepoInfo = useMemo(() => {
-    if (!selectedRepoFullName) return null;
-    for (const repos of Object.values(reposByOrg || {})) {
-      const match = repos.find((repo) => repo.fullName === selectedRepoFullName);
-      if (match) {
-        return match;
-      }
-    }
-    return null;
-  }, [selectedRepoFullName, reposByOrg]);
+  // const shouldShowCloudRepoOnboarding =
+  //   !!selectedRepoFullName && isCloudMode && !isEnvSelected && !hasDismissedCloudRepoOnboarding;
 
-  const shouldShowCloudRepoOnboarding =
-    !!selectedRepoFullName &&
-    isCloudMode &&
-    !isEnvSelected &&
-    !hasDismissedCloudRepoOnboarding;
+  // const createEnvironmentSearch = useMemo(() => {
+  //   if (!selectedRepoFullName) return null;
+  //   return {
+  //     step: "select" as const,
+  //     selectedRepos: [selectedRepoFullName],
+  //     instanceId: undefined,
+  //     connectionLogin: undefined,
+  //     repoSearch: undefined,
+  //     snapshotId: undefined,
+  //   };
+  // }, [selectedRepoFullName]);
 
-  const createEnvironmentSearch = useMemo<
-    EnvironmentNewSearchParams | undefined
-  >(
-    () =>
-      selectedRepoFullName
-        ? {
-          step: "select",
-          selectedRepos: [selectedRepoFullName],
-          instanceId: undefined,
-          connectionLogin:
-            selectedRepoInfo?.org ?? selectedRepoInfo?.ownerLogin ?? undefined,
-          repoSearch: undefined,
-          snapshotId: undefined,
-        }
-        : undefined,
-    [selectedRepoFullName, selectedRepoInfo],
-  );
-
-  const handleStartEnvironmentSetup = useCallback(() => {
-    clearEnvironmentDraft(teamSlugOrId);
-  }, [teamSlugOrId]);
+  // const handleStartEnvironmentSetup = useCallback(() => {
+  //   setHasDismissedCloudRepoOnboarding(true);
+  // }, []);
 
   const branchOptions = branchNames;
 
@@ -942,21 +912,28 @@ function DashboardComponent() {
               canSubmit={canSubmit}
               onStartTask={handleStartTask}
             />
-            {shouldShowCloudRepoOnboarding && createEnvironmentSearch ? (
-              <div className="mt-4 flex items-start gap-2 rounded-xl border border-blue-200/60 dark:border-blue-500/40 bg-blue-50/80 dark:bg-blue-500/10 px-3 py-2 text-sm text-blue-900 dark:text-blue-100">
-                <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500 dark:text-blue-300" />
+            {shouldShowWorkspaceSetup ? (
+              <WorkspaceSetupPanel
+                teamSlugOrId={teamSlugOrId}
+                projectFullName={selectedRepoFullName}
+              />
+            ) : null}
+
+            {/* {shouldShowCloudRepoOnboarding && createEnvironmentSearch ? (
+              <div className="mt-4 mb-4 flex items-start gap-2 rounded-xl border border-green-200/60 dark:border-green-500/40 bg-green-50/80 dark:bg-green-500/10 px-3 py-2 text-sm text-green-900 dark:text-green-100">
+                <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-500 dark:text-green-300" />
                 <div className="flex flex-col gap-1">
-                  <p className="font-medium text-blue-900 dark:text-blue-100">
+                  <p className="font-medium text-green-900 dark:text-green-100">
                     Set up an environment for {selectedRepoFullName}
                   </p>
-                  <p className="text-xs text-blue-900/80 dark:text-blue-200/80">
+                  <p className="text-xs text-green-900/80 dark:text-green-200/80">
                     Environments let you preconfigure development and maintenance scripts, pre-install packages, and environment variables so cloud workspaces are ready to go the moment they start.
                   </p>
                   <div className="flex gap-2 justify-end">
                     <button
                       type="button"
                       onClick={() => setHasDismissedCloudRepoOnboarding(true)}
-                      className="inline-flex items-center rounded-md border border-blue-200/60 bg-white/80 px-2 py-1 text-xs font-medium text-blue-900/70 hover:bg-white dark:border-blue-500/30 dark:bg-blue-500/5 dark:text-blue-100/80 dark:hover:bg-blue-500/15"
+                      className="inline-flex items-center rounded-md border border-green-200/60 bg-white/80 px-2 py-1 text-xs font-medium text-green-900/70 hover:bg-white dark:border-green-500/30 dark:bg-green-500/5 dark:text-green-100/80 dark:hover:bg-green-500/15"
                     >
                       Dismiss
                     </button>
@@ -965,14 +942,14 @@ function DashboardComponent() {
                       params={{ teamSlugOrId }}
                       search={createEnvironmentSearch}
                       onClick={handleStartEnvironmentSetup}
-                      className="inline-flex items-center rounded-md border border-blue-500/60 bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-900 dark:text-blue-100 hover:bg-blue-500/20"
+                      className="inline-flex items-center rounded-md border border-green-500/60 bg-green-500/10 px-2 py-1 text-xs font-medium text-green-900 dark:text-green-100 hover:bg-green-500/20"
                     >
                       Create environment
                     </Link>
                   </div>
                 </div>
               </div>
-            ) : null}
+            ) : null} */}
 
             {/* Task List */}
             <TaskList teamSlugOrId={teamSlugOrId} />

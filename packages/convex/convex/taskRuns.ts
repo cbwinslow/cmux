@@ -1271,6 +1271,37 @@ export const updateNetworking = authMutation({
   },
 });
 
+async function performUpdateEnvironmentError(
+  ctx: MutationCtx,
+  args: {
+    id: Id<"taskRuns">;
+    teamId: string;
+    userId: string;
+    maintenanceError?: string;
+    devError?: string;
+  },
+) {
+  const run = await ctx.db.get(args.id);
+
+  if (!run) {
+    throw new Error("Task run not found");
+  }
+
+  if (run.teamId !== args.teamId || run.userId !== args.userId) {
+    throw new Error("Task run mismatch for provided credentials");
+  }
+
+  const environmentError = normalizeEnvironmentErrorPayload(
+    args.maintenanceError,
+    args.devError,
+  );
+
+  await ctx.db.patch(args.id, {
+    environmentError,
+    updatedAt: Date.now(),
+  });
+}
+
 export const updateEnvironmentErrorFromWorker = internalMutation({
   args: {
     id: v.id("taskRuns"),
@@ -1280,24 +1311,27 @@ export const updateEnvironmentErrorFromWorker = internalMutation({
     devError: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const run = await ctx.db.get(args.id);
+    await performUpdateEnvironmentError(ctx, args);
+  },
+});
 
-    if (!run) {
-      throw new Error("Task run not found");
-    }
+export const updateEnvironmentError = authMutation({
+  args: {
+    teamSlugOrId: v.string(),
+    id: v.id("taskRuns"),
+    maintenanceError: v.optional(v.string()),
+    devError: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = ctx.identity.subject;
+    const teamId = await resolveTeamIdLoose(ctx, args.teamSlugOrId);
 
-    if (run.teamId !== args.teamId || run.userId !== args.userId) {
-      throw new Error("Task run mismatch for provided credentials");
-    }
-
-    const environmentError = normalizeEnvironmentErrorPayload(
-      args.maintenanceError,
-      args.devError,
-    );
-
-    await ctx.db.patch(args.id, {
-      environmentError,
-      updatedAt: Date.now(),
+    await performUpdateEnvironmentError(ctx, {
+      id: args.id,
+      teamId,
+      userId,
+      maintenanceError: args.maintenanceError,
+      devError: args.devError,
     });
   },
 });
