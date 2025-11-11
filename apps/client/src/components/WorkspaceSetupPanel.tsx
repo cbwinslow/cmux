@@ -20,22 +20,25 @@ import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 const MASKED_ENV_VALUE = "••••••••••••••••";
-const workspaceEnvVarRowKeys = new WeakMap<EnvVar, string>();
+type EnvVarWithRowKey = EnvVar & { __rowKey?: string };
 
-const getWorkspaceEnvVarRowKey = (row: EnvVar): string => {
-  let key = workspaceEnvVarRowKeys.get(row);
-  if (!key) {
-    const random =
-      typeof globalThis.crypto !== "undefined" &&
-      typeof globalThis.crypto.randomUUID === "function"
-        ? globalThis.crypto.randomUUID()
-        : `workspace-env-var-${Date.now()}-${Math.random()
-            .toString(36)
-            .slice(2)}`;
-    workspaceEnvVarRowKeys.set(row, random);
-    key = random;
+const generateWorkspaceEnvVarRowKey = (): string => {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return globalThis.crypto.randomUUID();
   }
-  return key;
+  return `workspace-env-var-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+};
+
+const ensureWorkspaceEnvVarRowKey = (row: EnvVarWithRowKey): string => {
+  if (!row.__rowKey) {
+    row.__rowKey = generateWorkspaceEnvVarRowKey();
+  }
+  return row.__rowKey;
 };
 
 type WorkspaceSetupPanelProps = {
@@ -387,9 +390,11 @@ export function WorkspaceSetupPanel({
                       {envVars.map((row, idx) => {
                         const shouldMaskValue =
                           areEnvValuesHidden && row.value.trim().length > 0;
+                        const envRow = row as EnvVarWithRowKey;
+                        const rowKey = ensureWorkspaceEnvVarRowKey(envRow);
                         return (
                           <div
-                            key={getWorkspaceEnvVarRowKey(row)}
+                            key={rowKey}
                             className="grid gap-2 items-center"
                             style={{
                               gridTemplateColumns: "3fr 7fr 36px",
