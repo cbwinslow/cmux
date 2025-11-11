@@ -48,6 +48,7 @@ import type * as teams from "../teams.js";
 import type * as users_utils_getWorkerAuth from "../users/utils/getWorkerAuth.js";
 import type * as users_utils_index from "../users/utils/index.js";
 import type * as users from "../users.js";
+import type * as workspaceConfigs from "../workspaceConfigs.js";
 import type * as workspaceSettings from "../workspaceSettings.js";
 
 import type {
@@ -105,6 +106,7 @@ declare const fullApi: ApiFromModules<{
   "users/utils/getWorkerAuth": typeof users_utils_getWorkerAuth;
   "users/utils/index": typeof users_utils_index;
   users: typeof users;
+  workspaceConfigs: typeof workspaceConfigs;
   workspaceSettings: typeof workspaceSettings;
 }>;
 declare const fullApiWithMounts: typeof fullApi;

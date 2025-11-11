@@ -59,6 +59,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FocusEvent,
   type MouseEvent,
   type ReactElement,
   type ReactNode,
@@ -117,15 +118,12 @@ function SidebarArchiveOverlay({
 }: SidebarArchiveOverlayProps) {
   return (
     <div className="relative flex h-4 w-4 items-center justify-center">
-      <div className="flex items-center justify-center group-hover:pointer-events-none group-hover:opacity-0 group-focus-within:pointer-events-none group-focus-within:opacity-0">
-        {icon}
-      </div>
       <Tooltip delayDuration={0}>
         <TooltipTrigger asChild>
           <button
             type="button"
             aria-label={label}
-            className="absolute inset-0 flex items-center justify-center rounded-sm text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 dark:focus-visible:outline-neutral-500"
+            className="peer absolute inset-0 flex items-center justify-center rounded-sm text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-50 opacity-0 pointer-events-none focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:opacity-100 group-hover:pointer-events-auto group-data-[focus-visible=true]:opacity-100 group-data-[focus-visible=true]:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 dark:focus-visible:outline-neutral-500"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -137,6 +135,9 @@ function SidebarArchiveOverlay({
         </TooltipTrigger>
         <TooltipContent side="right">{label}</TooltipContent>
       </Tooltip>
+      <div className="flex items-center justify-center group-hover:pointer-events-none group-hover:opacity-0 group-data-[focus-visible=true]:pointer-events-none group-data-[focus-visible=true]:opacity-0 peer-focus-visible:pointer-events-none peer-focus-visible:opacity-0">
+        {icon}
+      </div>
     </div>
   );
 }
@@ -449,6 +450,17 @@ function TaskTreeInner({
   const handlePrefetch = useCallback(() => {
     prefetchTaskRuns();
   }, [prefetchTaskRuns]);
+  const [isTaskLinkFocusVisible, setIsTaskLinkFocusVisible] = useState(false);
+  const handleTaskLinkFocus = useCallback(
+    (event: FocusEvent<HTMLAnchorElement>) => {
+      handlePrefetch();
+      setIsTaskLinkFocusVisible(event.currentTarget.matches(":focus-visible"));
+    },
+    [handlePrefetch]
+  );
+  const handleTaskLinkBlur = useCallback(() => {
+    setIsTaskLinkFocusVisible(false);
+  }, []);
 
   const { archiveWithUndo, unarchive } = useArchiveTask(teamSlugOrId);
 
@@ -638,16 +650,19 @@ function TaskTreeInner({
     );
   })();
 
-  const taskMetaIcon =
-    !task.isArchived && taskLeadingIcon ? (
-      <SidebarArchiveOverlay
-        icon={taskLeadingIcon}
-        label="Archive task"
-        onArchive={handleArchive}
-      />
-    ) : (
-      taskLeadingIcon
-    );
+  const shouldShowTaskArchiveOverlay =
+    !task.isArchived &&
+    (Boolean(taskLeadingIcon) || isLocalWorkspace || isCloudWorkspace);
+
+  const taskMetaIcon = shouldShowTaskArchiveOverlay ? (
+    <SidebarArchiveOverlay
+      icon={taskLeadingIcon}
+      label="Archive task"
+      onArchive={handleArchive}
+    />
+  ) : (
+    taskLeadingIcon
+  );
 
   return (
     <TaskRunExpansionContext.Provider value={expansionContextValue}>
@@ -660,8 +675,10 @@ function TaskTreeInner({
               search={{ runId: undefined }}
               activeOptions={{ exact: true }}
               className="group block"
+              data-focus-visible={isTaskLinkFocusVisible ? "true" : undefined}
               onMouseEnter={handlePrefetch}
-              onFocus={handlePrefetch}
+              onFocus={handleTaskLinkFocus}
+              onBlur={handleTaskLinkBlur}
               onClick={(event) => {
                 if (
                   event.defaultPrevented ||
@@ -705,18 +722,6 @@ function TaskTreeInner({
           <ContextMenu.Portal>
             <ContextMenu.Positioner className="outline-none z-[var(--z-context-menu)]">
               <ContextMenu.Popup className="origin-[var(--transform-origin)] rounded-md bg-white dark:bg-neutral-800 py-1 text-neutral-900 dark:text-neutral-100 shadow-lg shadow-gray-200 outline-1 outline-neutral-200 transition-[opacity] data-[ending-style]:opacity-0 dark:shadow-none dark:-outline-offset-1 dark:outline-neutral-700">
-                {canRenameTask ? (
-                  <>
-                    <ContextMenu.Item
-                      className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
-                      onClick={handleStartRenaming}
-                    >
-                      <Pencil className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                      <span>Rename Task</span>
-                    </ContextMenu.Item>
-                    <div className="my-1 h-px bg-neutral-200 dark:bg-neutral-700" />
-                  </>
-                ) : null}
                 <ContextMenu.Item
                   className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
                   onClick={handleCopyDescription}
@@ -724,6 +729,15 @@ function TaskTreeInner({
                   <CopyIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
                   <span>Copy Description</span>
                 </ContextMenu.Item>
+                {canRenameTask ? (
+                  <ContextMenu.Item
+                    className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
+                    onClick={handleStartRenaming}
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
+                    <span>Rename Task</span>
+                  </ContextMenu.Item>
+                ) : null}
                 <ContextMenu.SubmenuRoot>
                   <ContextMenu.SubmenuTrigger className="flex items-center gap-2 cursor-default py-1.5 pr-4 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700">
                     <ArchiveIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
@@ -1171,16 +1185,21 @@ function TaskRunTreeInner({
 
   const runLeadingIcon = pullRequestIcon ?? statusIconWithTooltip;
 
-  const runMetaIcon =
-    !run.isArchived && runLeadingIcon ? (
-      <SidebarArchiveOverlay
-        icon={runLeadingIcon}
-        label="Archive task run"
-        onArchive={handleArchiveRun}
-      />
-    ) : (
-      runLeadingIcon
-    );
+  const shouldShowRunArchiveOverlay =
+    !run.isArchived &&
+    (Boolean(runLeadingIcon) ||
+      isLocalWorkspaceRunEntry ||
+      isCloudWorkspaceRunEntry);
+
+  const runMetaIcon = shouldShowRunArchiveOverlay ? (
+    <SidebarArchiveOverlay
+      icon={runLeadingIcon}
+      label="Archive task run"
+      onArchive={handleArchiveRun}
+    />
+  ) : (
+    runLeadingIcon
+  );
 
   const crownIcon = run.isCrowned ? (
     <Tooltip delayDuration={0}>
@@ -1258,6 +1277,16 @@ function TaskRunTreeInner({
     shouldRenderTerminalLink ||
     shouldRenderPullRequestLink ||
     shouldRenderPreviewLink;
+  const [isRunLinkFocusVisible, setIsRunLinkFocusVisible] = useState(false);
+  const handleRunLinkFocus = useCallback(
+    (event: FocusEvent<HTMLAnchorElement>) => {
+      setIsRunLinkFocusVisible(event.currentTarget.matches(":focus-visible"));
+    },
+    []
+  );
+  const handleRunLinkBlur = useCallback(() => {
+    setIsRunLinkFocusVisible(false);
+  }, []);
 
   return (
     <div className={clsx({ hidden: run.isArchived })}>
@@ -1274,7 +1303,10 @@ function TaskRunTreeInner({
               runId: run._id,
             })}
             className="group block"
+            data-focus-visible={isRunLinkFocusVisible ? "true" : undefined}
             activeOptions={{ exact: false }}
+            onFocus={handleRunLinkFocus}
+            onBlur={handleRunLinkBlur}
             onClick={(event) => {
               if (
                 event.defaultPrevented ||
@@ -1505,7 +1537,7 @@ function TaskRunDetails({
       >
         <div className="space-y-1.5">
           <p className="font-medium text-sm text-neutral-200">
-            Environment Issue
+            Scripts error
           </p>
           {environmentError?.maintenanceError && (
             <p className="text-xs text-neutral-400">

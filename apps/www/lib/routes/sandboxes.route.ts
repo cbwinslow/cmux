@@ -6,6 +6,7 @@ import { verifyTeamAccess } from "@/lib/utils/team-verification";
 import { env } from "@/lib/utils/www-env";
 import { api } from "@cmux/convex/api";
 import { RESERVED_CMUX_PORT_SET } from "@cmux/shared/utils/reserved-cmux-ports";
+import { parseGithubRepoUrl } from "@cmux/shared/utils/parse-github-repo-url";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { HTTPException } from "hono/http-exception";
 import { MorphCloudClient } from "morphcloud";
@@ -165,7 +166,36 @@ sandboxesRouter.openapi(
         ? loadEnvironmentEnvVars(environmentDataVaultKey)
         : Promise.resolve<string | null>(null);
 
-      const maintenanceScript = environmentMaintenanceScript ?? null;
+      // Parse repo URL once if provided
+      const parsedRepoUrl = body.repoUrl ? parseGithubRepoUrl(body.repoUrl) : null;
+
+      // Load workspace config if we're in cloud mode with a repository (not an environment)
+      let workspaceConfig: { maintenanceScript?: string; envVarsContent?: string } | null = null;
+      if (parsedRepoUrl && !body.environmentId) {
+        try {
+          const config = await convex.query(api.workspaceConfigs.get, {
+            teamSlugOrId: body.teamSlugOrId,
+            projectFullName: parsedRepoUrl.fullName,
+          });
+          if (config) {
+            const envVarsContent = config.dataVaultKey
+              ? await loadEnvironmentEnvVars(config.dataVaultKey)
+              : null;
+            workspaceConfig = {
+              maintenanceScript: config.maintenanceScript ?? undefined,
+              envVarsContent: envVarsContent ?? undefined,
+            };
+            console.log(`[sandboxes.start] Loaded workspace config for ${parsedRepoUrl.fullName}`, {
+              hasMaintenanceScript: Boolean(workspaceConfig.maintenanceScript),
+              hasEnvVars: Boolean(workspaceConfig.envVarsContent),
+            });
+          }
+        } catch (error) {
+          console.error(`[sandboxes.start] Failed to load workspace config for ${parsedRepoUrl.fullName}`, error);
+        }
+      }
+
+      const maintenanceScript = environmentMaintenanceScript ?? workspaceConfig?.maintenanceScript ?? null;
       const devScript = environmentDevScript ?? null;
 
       const isCloudWorkspace =
@@ -213,7 +243,8 @@ sandboxesRouter.openapi(
       const environmentEnvVarsContent = await environmentEnvVarsPromise;
 
       // Prepare environment variables including task JWT if present
-      let envVarsToApply = environmentEnvVarsContent || "";
+      // Workspace env vars take precedence if no environment is configured
+      let envVarsToApply = environmentEnvVarsContent || workspaceConfig?.envVarsContent || "";
 
       // Add CMUX task-related env vars if present
       if (body.taskRunId) {
@@ -233,6 +264,7 @@ sandboxesRouter.openapi(
               `[sandboxes.start] Applied environment variables via envctl`,
               {
                 hasEnvironmentVars: Boolean(environmentEnvVarsContent),
+                hasWorkspaceVars: Boolean(workspaceConfig?.envVarsContent),
                 hasTaskRunId: Boolean(body.taskRunId),
                 hasTaskRunJwt: Boolean(body.taskRunJwt),
               },
@@ -277,23 +309,17 @@ sandboxesRouter.openapi(
       let repoConfig: HydrateRepoConfig | undefined;
       if (body.repoUrl) {
         console.log(`[sandboxes.start] Hydrating repo for ${instance.id}`);
-        const match = body.repoUrl.match(
-          /github\.com\/?([^\s/]+)\/([^\s/.]+)(?:\.git)?/i,
-        );
-        if (!match) {
+        if (!parsedRepoUrl) {
           return c.text("Unsupported repo URL; expected GitHub URL", 400);
         }
-        const owner = match[1]!;
-        const name = match[2]!;
-        const repoFull = `${owner}/${name}`;
-        console.log(`[sandboxes.start] Parsed owner/repo: ${repoFull}`);
+        console.log(`[sandboxes.start] Parsed owner/repo: ${parsedRepoUrl.fullName}`);
 
         repoConfig = {
-          owner,
-          name,
-          repoFull,
-          cloneUrl: `https://github.com/${owner}/${name}.git`,
-          maskedCloneUrl: `https://github.com/${owner}/${name}.git`,
+          owner: parsedRepoUrl.owner,
+          name: parsedRepoUrl.repo,
+          repoFull: parsedRepoUrl.fullName,
+          cloneUrl: parsedRepoUrl.gitUrl,
+          maskedCloneUrl: parsedRepoUrl.gitUrl,
           depth: Math.max(1, Math.floor(body.depth ?? 1)),
           baseBranch: body.branch || "main",
           newBranch: body.newBranch ?? "",
