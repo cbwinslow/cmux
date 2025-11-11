@@ -99,6 +99,8 @@ import clsx from "clsx";
 import { kitties } from "./kitty";
 import {
   HEATMAP_MODEL_ANTHROPIC_QUERY_VALUE,
+  HEATMAP_MODEL_DENSE_FINETUNE_QUERY_VALUE,
+  HEATMAP_MODEL_DENSE_V2_FINETUNE_QUERY_VALUE,
   HEATMAP_MODEL_FINETUNE_QUERY_VALUE,
   HEATMAP_MODEL_QUERY_KEY,
   normalizeHeatmapModelQueryValue,
@@ -219,13 +221,28 @@ const filenameLanguageMap: Record<string, string> = {
 
 type HeatmapModelOptionValue = HeatmapModelQueryValue;
 
+const LEGACY_HEATMAP_MODEL_PARAM_ENTRIES: ReadonlyArray<
+  [string, HeatmapModelOptionValue]
+> = [
+  ["ft0", HEATMAP_MODEL_FINETUNE_QUERY_VALUE],
+  ["ft1", HEATMAP_MODEL_DENSE_FINETUNE_QUERY_VALUE],
+];
+
 const HEATMAP_MODEL_OPTIONS: ReadonlyArray<{
   value: HeatmapModelOptionValue;
   label: string;
 }> = [
   {
+    value: HEATMAP_MODEL_DENSE_V2_FINETUNE_QUERY_VALUE,
+    label: "cmux-heatmap-2",
+  },
+  {
     value: HEATMAP_MODEL_FINETUNE_QUERY_VALUE,
     label: "cmux-heatmap-0",
+  },
+  {
+    value: HEATMAP_MODEL_DENSE_FINETUNE_QUERY_VALUE,
+    label: "cmux-heatmap-1",
   },
   {
     value: HEATMAP_MODEL_ANTHROPIC_QUERY_VALUE,
@@ -237,10 +254,12 @@ function deriveHeatmapModelFromSearchParams(
   params: ReadonlyURLSearchParams | null
 ): HeatmapModelOptionValue {
   if (!params) {
-    return HEATMAP_MODEL_FINETUNE_QUERY_VALUE;
+    return HEATMAP_MODEL_DENSE_V2_FINETUNE_QUERY_VALUE;
   }
-  if (params.has("ft0")) {
-    return HEATMAP_MODEL_FINETUNE_QUERY_VALUE;
+  for (const [paramKey, selection] of LEGACY_HEATMAP_MODEL_PARAM_ENTRIES) {
+    if (params.has(paramKey)) {
+      return selection;
+    }
   }
   return normalizeHeatmapModelQueryValue(
     params.get(HEATMAP_MODEL_QUERY_KEY)
@@ -590,7 +609,7 @@ export function PullRequestDiffViewer({
   const [heatmapModelPreference, setHeatmapModelPreference] =
     useLocalStorage<HeatmapModelOptionValue>({
       key: "cmux-heatmap-model",
-      defaultValue: HEATMAP_MODEL_FINETUNE_QUERY_VALUE,
+      defaultValue: HEATMAP_MODEL_DENSE_V2_FINETUNE_QUERY_VALUE,
     });
   const pendingModelPreferenceRef = useRef<HeatmapModelOptionValue | null>(
     null
@@ -618,8 +637,11 @@ export function PullRequestDiffViewer({
 
   const handleHeatmapModelPreferenceChange = useCallback(
     (value: HeatmapModelOptionValue) => {
+      const hasLegacyModelOverride = LEGACY_HEATMAP_MODEL_PARAM_ENTRIES.some(
+        ([paramKey]) => searchParams.has(paramKey)
+      );
       const isQuerySynced =
-        value === urlModelValue && !searchParams.has("ft0");
+        value === urlModelValue && !hasLegacyModelOverride;
       if (value !== heatmapModelPreference) {
         setHeatmapModelPreference(value);
       }
@@ -630,7 +652,9 @@ export function PullRequestDiffViewer({
 
       pendingModelPreferenceRef.current = value;
       const currentParams = new URLSearchParams(searchParams.toString());
-      currentParams.delete("ft0");
+      for (const [paramKey] of LEGACY_HEATMAP_MODEL_PARAM_ENTRIES) {
+        currentParams.delete(paramKey);
+      }
       currentParams.set(HEATMAP_MODEL_QUERY_KEY, value);
       const nextQuery = currentParams.toString();
       const targetUrl =
