@@ -1,17 +1,22 @@
 import { useMemo } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQuery as useRQ } from "@tanstack/react-query";
 import { MonacoGitDiffViewer } from "./monaco/monaco-git-diff-viewer";
+import { RunScreenshotGallery } from "./RunScreenshotGallery";
 import { gitDiffQueryOptions } from "@/queries/git-diff";
 import { normalizeGitRef } from "@/lib/refWithOrigin";
 import type { TaskRunWithChildren } from "@/types/task";
-import type { Doc } from "@cmux/convex/dataModel";
+import type { Doc, Id } from "@cmux/convex/dataModel";
+import { convexQuery } from "@convex-dev/react-query";
+import { api } from "@cmux/convex/api";
 
 export interface TaskRunGitDiffPanelProps {
   task: Doc<"tasks"> | null | undefined;
   selectedRun: TaskRunWithChildren | null | undefined;
+  teamSlugOrId: string;
+  taskId: Id<"tasks">;
 }
 
-export function TaskRunGitDiffPanel({ task, selectedRun }: TaskRunGitDiffPanelProps) {
+export function TaskRunGitDiffPanel({ task, selectedRun, teamSlugOrId, taskId }: TaskRunGitDiffPanelProps) {
   const normalizedBaseBranch = useMemo(() => {
     const candidate = task?.baseBranch;
     if (candidate && candidate.trim()) {
@@ -63,6 +68,20 @@ export function TaskRunGitDiffPanel({ task, selectedRun }: TaskRunGitDiffPanelPr
   const isLoading = diffQueries.some((query) => query.isLoading);
   const hasError = diffQueries.some((query) => query.isError);
 
+  // Fetch screenshot sets for the selected run
+  const runDiffContextQuery = useRQ({
+    ...convexQuery(api.taskRuns.getRunDiffContext, {
+      teamSlugOrId,
+      taskId,
+      runId: selectedRun?._id ?? ("" as any),
+    }),
+    enabled: Boolean(selectedRun?._id && teamSlugOrId && taskId),
+  });
+
+  const screenshotSets = runDiffContextQuery.data?.screenshotSets ?? [];
+  const screenshotSetsLoading =
+    runDiffContextQuery.isLoading && screenshotSets.length === 0;
+
   if (!selectedRun || !normalizedHeadBranch) {
     return (
       <div className="flex h-full items-center justify-center px-4 text-center text-sm text-neutral-500 dark:text-neutral-400">
@@ -97,6 +116,16 @@ export function TaskRunGitDiffPanel({ task, selectedRun }: TaskRunGitDiffPanelPr
 
   return (
     <div className="relative h-full min-h-0 overflow-auto">
+      {screenshotSetsLoading ? (
+        <div className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-950/40 px-3.5 py-3 text-sm text-neutral-500 dark:text-neutral-400">
+          Loading screenshots...
+        </div>
+      ) : (
+        <RunScreenshotGallery
+          screenshotSets={screenshotSets}
+          highlightedSetId={selectedRun?.latestScreenshotSetId ?? null}
+        />
+      )}
       <MonacoGitDiffViewer diffs={allDiffs} />
     </div>
   );
