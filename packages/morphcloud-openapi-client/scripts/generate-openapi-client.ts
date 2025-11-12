@@ -20,8 +20,19 @@ if (!response.ok) {
     `Failed to download MorphCloud OpenAPI spec (${response.status} ${response.statusText})`
   )
 }
-const specBody = await response.text()
+const rawSpec = await response.text()
 console.timeEnd('morphcloud:download-openapi')
+
+let specBody = rawSpec
+try {
+  const parsed = JSON.parse(rawSpec)
+  if (!Array.isArray(parsed.servers) || parsed.servers.length === 0) {
+    parsed.servers = [{ url: 'https://cloud.morph.so/api' }]
+  }
+  specBody = JSON.stringify(parsed)
+} catch {
+  // Leave as-is if the spec is not JSON
+}
 
 const tmpFile = path.join(
   os.tmpdir(),
