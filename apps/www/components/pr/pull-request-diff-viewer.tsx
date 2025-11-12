@@ -254,16 +254,14 @@ function deriveHeatmapModelFromSearchParams(
   params: ReadonlyURLSearchParams | null
 ): HeatmapModelOptionValue {
   if (!params) {
-    return HEATMAP_MODEL_DENSE_V2_FINETUNE_QUERY_VALUE;
+    return HEATMAP_MODEL_ANTHROPIC_QUERY_VALUE;
   }
   for (const [paramKey, selection] of LEGACY_HEATMAP_MODEL_PARAM_ENTRIES) {
     if (params.has(paramKey)) {
       return selection;
     }
   }
-  return normalizeHeatmapModelQueryValue(
-    params.get(HEATMAP_MODEL_QUERY_KEY)
-  );
+  return normalizeHeatmapModelQueryValue(params.get(HEATMAP_MODEL_QUERY_KEY));
 }
 
 type RefractorLike = {
@@ -609,7 +607,7 @@ export function PullRequestDiffViewer({
   const [heatmapModelPreference, setHeatmapModelPreference] =
     useLocalStorage<HeatmapModelOptionValue>({
       key: "cmux-heatmap-model",
-      defaultValue: HEATMAP_MODEL_DENSE_V2_FINETUNE_QUERY_VALUE,
+      defaultValue: HEATMAP_MODEL_ANTHROPIC_QUERY_VALUE,
     });
   const pendingModelPreferenceRef = useRef<HeatmapModelOptionValue | null>(
     null
@@ -640,8 +638,7 @@ export function PullRequestDiffViewer({
       const hasLegacyModelOverride = LEGACY_HEATMAP_MODEL_PARAM_ENTRIES.some(
         ([paramKey]) => searchParams.has(paramKey)
       );
-      const isQuerySynced =
-        value === urlModelValue && !hasLegacyModelOverride;
+      const isQuerySynced = value === urlModelValue && !hasLegacyModelOverride;
       if (value !== heatmapModelPreference) {
         setHeatmapModelPreference(value);
       }
@@ -2185,168 +2182,170 @@ export function PullRequestDiffViewer({
         dangerouslySetInnerHTML={{ __html: heatmapGradientCss }}
       />
       <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch lg:gap-0">
-        <aside
-          id={sidebarPanelId}
-          className="relative w-full lg:sticky lg:top-2 lg:h-[calc(100vh)] lg:flex-none lg:overflow-y-auto lg:w-[var(--pr-diff-sidebar-width)] lg:min-w-[15rem] lg:max-w-[32.5rem]"
-          style={
-            {
-              "--pr-diff-sidebar-width": `${sidebarWidth}px`,
-            } as CSSProperties
-          }
-        >
-          <div className="flex flex-col gap-3">
-            <div className="lg:sticky lg:top-0 lg:z-10 lg:bg-white">
-              <ReviewProgressIndicator
-                totalFileCount={totalFileCount}
-                processedFileCount={processedFileCount}
-                isLoading={isLoadingFileOutputs}
-              />
-            </div>
-            {notificationCardState ? (
-              <ReviewCompletionNotificationCard state={notificationCardState} />
-            ) : null}
-            <HeatmapThresholdControl
-              value={heatmapThresholdInput}
-              onChange={setHeatmapThresholdInput}
-              colors={heatmapColors}
-              onColorsChange={handleHeatmapColorsChange}
-              onCopyStyles={handleCopyHeatmapConfig}
-              onLoadConfig={handlePromptLoadColors}
-              copyStatus={clipboard.copied}
-              selectedModel={heatmapModelPreference}
-              onModelChange={handleHeatmapModelPreferenceChange}
-            />
-            <CmuxPromoCard />
-            {targetCount > 0 ? (
-              <div className="flex justify-center">
-                <ErrorNavigator
-                  totalCount={targetCount}
-                  currentIndex={focusedErrorIndex}
-                  onPrevious={handleFocusPrevious}
-                  onNext={handleFocusNext}
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch lg:gap-0">
+          <aside
+            id={sidebarPanelId}
+            className="relative w-full lg:sticky lg:top-2 lg:h-[calc(100vh)] lg:flex-none lg:overflow-y-auto lg:w-[var(--pr-diff-sidebar-width)] lg:min-w-[15rem] lg:max-w-[32.5rem]"
+            style={
+              {
+                "--pr-diff-sidebar-width": `${sidebarWidth}px`,
+              } as CSSProperties
+            }
+          >
+            <div className="flex flex-col gap-3">
+              <div className="lg:sticky lg:top-0 lg:z-10 lg:bg-white">
+                <ReviewProgressIndicator
+                  totalFileCount={totalFileCount}
+                  processedFileCount={processedFileCount}
+                  isLoading={isLoadingFileOutputs}
                 />
               </div>
-            ) : null}
-            <div>
-              <FileTreeNavigator
-                nodes={fileTree}
-                activePath={activeAnchor}
-                expandedPaths={expandedPaths}
-                onToggleDirectory={handleToggleDirectory}
-                onSelectFile={handleNavigate}
+              {notificationCardState ? (
+                <ReviewCompletionNotificationCard
+                  state={notificationCardState}
+                />
+              ) : null}
+              <HeatmapThresholdControl
+                value={heatmapThresholdInput}
+                onChange={setHeatmapThresholdInput}
+                colors={heatmapColors}
+                onColorsChange={handleHeatmapColorsChange}
+                onCopyStyles={handleCopyHeatmapConfig}
+                onLoadConfig={handlePromptLoadColors}
+                copyStatus={clipboard.copied}
+                selectedModel={heatmapModelPreference}
+                onModelChange={handleHeatmapModelPreferenceChange}
               />
+              <CmuxPromoCard />
+              {targetCount > 0 ? (
+                <div className="flex justify-center">
+                  <ErrorNavigator
+                    totalCount={targetCount}
+                    currentIndex={focusedErrorIndex}
+                    onPrevious={handleFocusPrevious}
+                    onNext={handleFocusNext}
+                  />
+                </div>
+              ) : null}
+              <div>
+                <FileTreeNavigator
+                  nodes={fileTree}
+                  activePath={activeAnchor}
+                  expandedPaths={expandedPaths}
+                  onToggleDirectory={handleToggleDirectory}
+                  onSelectFile={handleNavigate}
+                />
+              </div>
             </div>
-          </div>
-          <div className="h-[40px]" />
-        </aside>
+            <div className="h-[40px]" />
+          </aside>
 
-        <div className="relative hidden lg:flex lg:flex-none lg:self-stretch lg:px-1 group/resize">
-          <div
-            className={cn(
-              "flex h-full w-full cursor-col-resize select-none items-center justify-center touch-none rounded",
-              "focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-sky-500",
-              isResizingSidebar
-                ? "bg-sky-200/60 dark:bg-sky-900/40"
-                : "bg-transparent hover:bg-sky-100/60 dark:hover:bg-sky-900/40"
-            )}
-            role="separator"
-            aria-label="Resize file navigation panel"
-            aria-orientation="vertical"
-            aria-controls={sidebarPanelId}
-            aria-valuenow={Math.round(sidebarWidth)}
-            aria-valuemin={SIDEBAR_MIN_WIDTH}
-            aria-valuemax={SIDEBAR_MAX_WIDTH}
-            tabIndex={0}
-            onPointerDown={handleSidebarResizePointerDown}
-            onKeyDown={handleSidebarResizeKeyDown}
-            onDoubleClick={handleSidebarResizeDoubleClick}
-          >
-            <span className="sr-only">
-              Drag to adjust file navigation width
-            </span>
+          <div className="relative hidden lg:flex lg:flex-none lg:self-stretch lg:px-1 group/resize">
             <div
               className={cn(
-                "h-full w-[3px] rounded-full transition-opacity",
+                "flex h-full w-full cursor-col-resize select-none items-center justify-center touch-none rounded",
+                "focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-sky-500",
                 isResizingSidebar
-                  ? "bg-sky-500 dark:bg-sky-400 opacity-100"
-                  : "bg-neutral-400 opacity-0 group-hover/resize:opacity-100 dark:bg-neutral-500"
+                  ? "bg-sky-200/60 dark:bg-sky-900/40"
+                  : "bg-transparent hover:bg-sky-100/60 dark:hover:bg-sky-900/40"
               )}
-              aria-hidden
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 min-w-0 space-y-3">
-          {thresholdedFileEntries.map(
-            ({ entry, review, diffHeatmap, streamState }) => {
-              const isFocusedFile =
-                focusedError?.filePath === entry.file.filename;
-              const focusedLine = isFocusedFile
-                ? focusedError
-                  ? {
-                      side: focusedError.side,
-                      lineNumber: focusedError.lineNumber,
-                    }
-                  : null
-                : null;
-              const focusedChangeKey = isFocusedFile
-                ? (focusedError?.changeKey ?? null)
-                : null;
-              const autoTooltipLine =
-                isFocusedFile &&
-                autoTooltipTarget &&
-                autoTooltipTarget.filePath === entry.file.filename
-                  ? {
-                      side: autoTooltipTarget.side,
-                      lineNumber: autoTooltipTarget.lineNumber,
-                    }
-                  : null;
-
-              const isLoading =
-                !fileOutputIndex.has(entry.file.filename) &&
-                (!streamState || streamState.status === "pending");
-
-              return (
-                <FileDiffCard
-                  key={entry.anchorId}
-                  entry={entry}
-                  isActive={entry.anchorId === activeAnchor}
-                  review={review}
-                  diffHeatmap={diffHeatmap}
-                  focusedLine={focusedLine}
-                  focusedChangeKey={focusedChangeKey}
-                  autoTooltipLine={autoTooltipLine}
-                  isLoading={isLoading}
-                  streamState={streamState}
-                />
-              );
-            }
-          )}
-          <div className="h-[70dvh] w-full">
-            <div className="px-3 py-6 text-center">
-              <span className="select-none text-xs text-neutral-500">
-                You&apos;ve reached the end of the diff!
+              role="separator"
+              aria-label="Resize file navigation panel"
+              aria-orientation="vertical"
+              aria-controls={sidebarPanelId}
+              aria-valuenow={Math.round(sidebarWidth)}
+              aria-valuemin={SIDEBAR_MIN_WIDTH}
+              aria-valuemax={SIDEBAR_MAX_WIDTH}
+              tabIndex={0}
+              onPointerDown={handleSidebarResizePointerDown}
+              onKeyDown={handleSidebarResizeKeyDown}
+              onDoubleClick={handleSidebarResizeDoubleClick}
+            >
+              <span className="sr-only">
+                Drag to adjust file navigation width
               </span>
-              <div className="grid place-content-center pb-4">
-                <pre className="mt-2 select-none text-left text-[8px] font-mono text-neutral-500">
-                  {kitty}
-                </pre>
+              <div
+                className={cn(
+                  "h-full w-[3px] rounded-full transition-opacity",
+                  isResizingSidebar
+                    ? "bg-sky-500 dark:bg-sky-400 opacity-100"
+                    : "bg-neutral-400 opacity-0 group-hover/resize:opacity-100 dark:bg-neutral-500"
+                )}
+                aria-hidden
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 min-w-0 space-y-3">
+            {thresholdedFileEntries.map(
+              ({ entry, review, diffHeatmap, streamState }) => {
+                const isFocusedFile =
+                  focusedError?.filePath === entry.file.filename;
+                const focusedLine = isFocusedFile
+                  ? focusedError
+                    ? {
+                        side: focusedError.side,
+                        lineNumber: focusedError.lineNumber,
+                      }
+                    : null
+                  : null;
+                const focusedChangeKey = isFocusedFile
+                  ? (focusedError?.changeKey ?? null)
+                  : null;
+                const autoTooltipLine =
+                  isFocusedFile &&
+                  autoTooltipTarget &&
+                  autoTooltipTarget.filePath === entry.file.filename
+                    ? {
+                        side: autoTooltipTarget.side,
+                        lineNumber: autoTooltipTarget.lineNumber,
+                      }
+                    : null;
+
+                const isLoading =
+                  !fileOutputIndex.has(entry.file.filename) &&
+                  (!streamState || streamState.status === "pending");
+
+                return (
+                  <FileDiffCard
+                    key={entry.anchorId}
+                    entry={entry}
+                    isActive={entry.anchorId === activeAnchor}
+                    review={review}
+                    diffHeatmap={diffHeatmap}
+                    focusedLine={focusedLine}
+                    focusedChangeKey={focusedChangeKey}
+                    autoTooltipLine={autoTooltipLine}
+                    isLoading={isLoading}
+                    streamState={streamState}
+                  />
+                );
+              }
+            )}
+            <div className="h-[70dvh] w-full">
+              <div className="px-3 py-6 text-center">
+                <span className="select-none text-xs text-neutral-500">
+                  You&apos;ve reached the end of the diff!
+                </span>
+                <div className="grid place-content-center pb-4">
+                  <pre className="mt-2 select-none text-left text-[8px] font-mono text-neutral-500">
+                    {kitty}
+                  </pre>
+                </div>
+                <a
+                  href="https://github.com/manaflow-ai/cmux"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:bg-neutral-50 select-none"
+                >
+                  <Star className="h-3.5 w-3.5" aria-hidden />
+                  Star on GitHub
+                </a>
               </div>
-              <a
-                href="https://github.com/manaflow-ai/cmux"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:bg-neutral-50 select-none"
-              >
-                <Star className="h-3.5 w-3.5" aria-hidden />
-                Star on GitHub
-              </a>
             </div>
           </div>
         </div>
       </div>
-    </div>
     </>
   );
 }
@@ -2550,7 +2549,10 @@ function HeatmapThresholdControl({
     (section: keyof HeatmapColorSettings, stop: keyof HeatmapGradientStops) =>
       (event: ChangeEvent<HTMLInputElement>) => {
         const nextValue = event.target.value;
-        if (!isValidHexColor(nextValue) || nextValue === colors[section][stop]) {
+        if (
+          !isValidHexColor(nextValue) ||
+          nextValue === colors[section][stop]
+        ) {
           return;
         }
         onColorsChange({
@@ -2601,9 +2603,11 @@ function HeatmapThresholdControl({
         Only show heatmap highlights with a score at or above this value.
       </p>
       <div className="mt-4 space-y-5">
-        {(Object.keys(COLOR_SECTION_METADATA) as Array<
-          keyof HeatmapColorSettings
-        >).map((section) => {
+        {(
+          Object.keys(COLOR_SECTION_METADATA) as Array<
+            keyof HeatmapColorSettings
+          >
+        ).map((section) => {
           const meta = COLOR_SECTION_METADATA[section];
           return (
             <div key={section} className="space-y-2">
@@ -3320,9 +3324,8 @@ const FileDiffCard = memo(function FileDiffCardComponent({
                         bestHeatmapClass = candidate;
                         return;
                       }
-                      const currentStep = extractHeatmapGradientStep(
-                        bestHeatmapClass
-                      );
+                      const currentStep =
+                        extractHeatmapGradientStep(bestHeatmapClass);
                       const nextStep = extractHeatmapGradientStep(candidate);
                       if (nextStep > currentStep) {
                         bestHeatmapClass = candidate;
@@ -3871,7 +3874,9 @@ type RgbColor = {
   b: number;
 };
 
-function normalizeHeatmapColorSettings(value: unknown): HeatmapColorSettings | null {
+function normalizeHeatmapColorSettings(
+  value: unknown
+): HeatmapColorSettings | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -3885,13 +3890,17 @@ function normalizeHeatmapColorSettings(value: unknown): HeatmapColorSettings | n
   return { line, token };
 }
 
-function normalizeHeatmapGradientStops(value: unknown): HeatmapGradientStops | null {
+function normalizeHeatmapGradientStops(
+  value: unknown
+): HeatmapGradientStops | null {
   if (!value || typeof value !== "object") {
     return null;
   }
   const record = value as { start?: unknown; end?: unknown };
-  const start = typeof record.start === "string" ? normalizeHexColor(record.start) : null;
-  const end = typeof record.end === "string" ? normalizeHexColor(record.end) : null;
+  const start =
+    typeof record.start === "string" ? normalizeHexColor(record.start) : null;
+  const end =
+    typeof record.end === "string" ? normalizeHexColor(record.end) : null;
   if (!start || !end) {
     return null;
   }
@@ -3911,30 +3920,30 @@ function normalizeHexColor(value: string): string | null {
 }
 
 function buildHeatmapGradientStyles(colors: HeatmapColorSettings): string {
-  const fallbackLineStart =
-    parseHexColor(DEFAULT_HEATMAP_COLORS.line.start) ?? {
-      r: 254,
-      g: 249,
-      b: 195,
-    };
-  const fallbackLineEnd =
-    parseHexColor(DEFAULT_HEATMAP_COLORS.line.end) ?? {
-      r: 253,
-      g: 186,
-      b: 116,
-    };
-  const fallbackTokenStart =
-    parseHexColor(DEFAULT_HEATMAP_COLORS.token.start) ?? {
-      r: 253,
-      g: 224,
-      b: 71,
-    };
-  const fallbackTokenEnd =
-    parseHexColor(DEFAULT_HEATMAP_COLORS.token.end) ?? {
-      r: 234,
-      g: 88,
-      b: 12,
-    };
+  const fallbackLineStart = parseHexColor(
+    DEFAULT_HEATMAP_COLORS.line.start
+  ) ?? {
+    r: 254,
+    g: 249,
+    b: 195,
+  };
+  const fallbackLineEnd = parseHexColor(DEFAULT_HEATMAP_COLORS.line.end) ?? {
+    r: 253,
+    g: 186,
+    b: 116,
+  };
+  const fallbackTokenStart = parseHexColor(
+    DEFAULT_HEATMAP_COLORS.token.start
+  ) ?? {
+    r: 253,
+    g: 224,
+    b: 71,
+  };
+  const fallbackTokenEnd = parseHexColor(DEFAULT_HEATMAP_COLORS.token.end) ?? {
+    r: 234,
+    g: 88,
+    b: 12,
+  };
 
   const lineStart = parseHexColor(colors.line.start) ?? fallbackLineStart;
   const lineEnd = parseHexColor(colors.line.end) ?? fallbackLineEnd;
@@ -3981,11 +3990,7 @@ function parseHexColor(value: string): RgbColor | null {
   const r = Number.parseInt(normalized.slice(0, 2), 16);
   const g = Number.parseInt(normalized.slice(2, 4), 16);
   const b = Number.parseInt(normalized.slice(4, 6), 16);
-  if (
-    Number.isNaN(r) ||
-    Number.isNaN(g) ||
-    Number.isNaN(b)
-  ) {
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
     return null;
   }
   return { r, g, b };
@@ -3993,8 +3998,7 @@ function parseHexColor(value: string): RgbColor | null {
 
 function mixRgb(start: RgbColor, end: RgbColor, ratio: number): RgbColor {
   const clampRatio = Math.min(Math.max(ratio, 0), 1);
-  const lerp = (a: number, b: number) =>
-    Math.round(a + (b - a) * clampRatio);
+  const lerp = (a: number, b: number) => Math.round(a + (b - a) * clampRatio);
   return {
     r: lerp(start.r, end.r),
     g: lerp(start.g, end.g),
@@ -4020,9 +4024,7 @@ function getContrastingTextColor(color: RgbColor): string {
     b: color.b / 255,
   };
   const luminance =
-    0.2126 * normalized.r +
-    0.7152 * normalized.g +
-    0.0722 * normalized.b;
+    0.2126 * normalized.r + 0.7152 * normalized.g + 0.0722 * normalized.b;
   return luminance > 0.6 ? "#1f2937" : "#fefefe";
 }
 

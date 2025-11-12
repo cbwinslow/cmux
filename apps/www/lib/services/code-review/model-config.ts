@@ -15,10 +15,7 @@ export type HeatmapModelQueryValue =
   | typeof HEATMAP_MODEL_DENSE_V2_FINETUNE_QUERY_VALUE
   | typeof HEATMAP_MODEL_ANTHROPIC_QUERY_VALUE;
 
-const LEGACY_HEATMAP_MODEL_PARAM_MAP: Record<
-  string,
-  HeatmapModelQueryValue
-> = {
+const LEGACY_HEATMAP_MODEL_PARAM_MAP: Record<string, HeatmapModelQueryValue> = {
   ft0: HEATMAP_MODEL_FINETUNE_QUERY_VALUE,
   ft1: HEATMAP_MODEL_DENSE_FINETUNE_QUERY_VALUE,
 };
@@ -60,7 +57,7 @@ function createAnthropicOpusConfig(): ModelConfig {
 }
 
 export function getDefaultHeatmapModelConfig(): ModelConfig {
-  return createFineTunedDenseV2OpenAiConfig();
+  return createAnthropicOpusConfig();
 }
 
 export function getHeatmapModelConfigForSelection(
@@ -82,7 +79,7 @@ export function normalizeHeatmapModelQueryValue(
   raw: string | null | undefined
 ): HeatmapModelQueryValue {
   if (typeof raw !== "string") {
-    return HEATMAP_MODEL_DENSE_V2_FINETUNE_QUERY_VALUE;
+    return HEATMAP_MODEL_ANTHROPIC_QUERY_VALUE;
   }
   const normalized = raw.trim().toLowerCase();
   if (normalized === HEATMAP_MODEL_DENSE_V2_FINETUNE_QUERY_VALUE) {
@@ -97,7 +94,7 @@ export function normalizeHeatmapModelQueryValue(
   if (normalized === HEATMAP_MODEL_FINETUNE_QUERY_VALUE) {
     return HEATMAP_MODEL_FINETUNE_QUERY_VALUE;
   }
-  return HEATMAP_MODEL_DENSE_V2_FINETUNE_QUERY_VALUE;
+  return HEATMAP_MODEL_ANTHROPIC_QUERY_VALUE;
 }
 
 function extractRecordValue(
