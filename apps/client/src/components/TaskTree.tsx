@@ -21,7 +21,7 @@ import {
 } from "@cmux/shared/pull-request-state";
 import { Link, useLocation, type LinkProps } from "@tanstack/react-router";
 import clsx from "clsx";
-import { useMutation, useQuery as useConvexQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -340,7 +340,7 @@ function TaskTreeInner({
   );
   const isOptimisticTask = isFakeConvexId(task._id);
   const canRenameTask = !isOptimisticTask;
-  const taskRuns = useConvexQuery(
+  const taskRuns = useQuery(
     api.taskRuns.getByTask,
     isOptimisticTask
       ? "skip"
@@ -702,14 +702,14 @@ function TaskTreeInner({
                   expanded: isExpanded,
                   onToggle: handleToggle,
                   visible: canExpand,
-              }}
-              title={taskTitleContent}
-              titleClassName={taskTitleClassName}
-              secondary={taskSecondary || undefined}
-              meta={taskMetaIcon || undefined}
-              className={clsx(isRenaming && "pr-2")}
-            />
-          </Link>
+                }}
+                title={taskTitleContent}
+                titleClassName={taskTitleClassName}
+                secondary={taskSecondary || undefined}
+                meta={taskMetaIcon || undefined}
+                className={clsx(isRenaming && "pr-2")}
+              />
+            </Link>
           </ContextMenu.Trigger>
           {isRenaming && renameError ? (
             <div
@@ -1244,6 +1244,12 @@ function TaskRunTreeInner({
     if (!run.networking) return [];
     return run.networking.filter((service) => service.status === "running");
   }, [run.networking]);
+
+  // Get task to extract repo information
+  const task = useQuery(api.tasks.getById, {
+    teamSlugOrId,
+    id: taskId,
+  });
 
   const {
     actions: openWithActions,

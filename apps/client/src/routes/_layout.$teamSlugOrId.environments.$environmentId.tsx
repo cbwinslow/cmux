@@ -4,6 +4,7 @@ import { ScriptTextareaField } from "@/components/ScriptTextareaField";
 import { SCRIPT_COPY } from "@/components/scriptCopy";
 import { TitleBar } from "@/components/TitleBar";
 import { queryClient } from "@/query-client";
+import { convexQueryClient } from "@/contexts/convex/convex-query-client";
 import {
   Tooltip,
   TooltipContent,
@@ -22,12 +23,9 @@ import {
   postApiSandboxesStartMutation,
 } from "@cmux/www-openapi-client/react-query";
 import { convexQuery } from "@convex-dev/react-query";
-import {
-  useMutation as useRQMutation,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useMutation as useRQMutation } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { formatDistanceToNow } from "date-fns";
 import {
   ArrowLeft,
@@ -46,31 +44,27 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute(
-  "/_layout/$teamSlugOrId/environments/$environmentId",
+  "/_layout/$teamSlugOrId/environments/$environmentId"
 )({
   parseParams: (params) => ({
     ...params,
     environmentId: typedZid("environments").parse(params.environmentId),
   }),
   loader: async ({ params }) => {
-    void queryClient.ensureQueryData(
-      convexQuery(api.environments.get, {
+    convexQueryClient.convexClient.prewarmQuery({
+      query: api.environments.get,
+      args: {
         teamSlugOrId: params.teamSlugOrId,
         id: params.environmentId,
-      }),
-    );
-    void queryClient.ensureQueryData(
-      convexQuery(api.environmentSnapshots.list, {
+      },
+    });
+    convexQueryClient.convexClient.prewarmQuery({
+      query: api.environmentSnapshots.list,
+      args: {
         teamSlugOrId: params.teamSlugOrId,
         environmentId: params.environmentId,
-      }),
-    );
-    void queryClient.ensureQueryData(
-      convexQuery(api.environments.get, {
-        teamSlugOrId: params.teamSlugOrId,
-        id: params.environmentId,
-      }),
-    );
+      },
+    });
   },
   component: EnvironmentDetailsPage,
   validateSearch: () => ({}),
@@ -80,57 +74,58 @@ function EnvironmentDetailsPage() {
   const { teamSlugOrId, environmentId } = Route.useParams();
   const navigate = useNavigate({ from: Route.fullPath });
   const [isDeleting, setIsDeleting] = useState(false);
-  const environmentQuery = convexQuery(api.environments.get, {
+  const environment = useQuery(api.environments.get, {
     teamSlugOrId,
     id: environmentId,
   });
-  const { data: environment } = useSuspenseQuery(environmentQuery);
   if (!environment) {
     throw new Error("Environment not found");
   }
-  const snapshotsQuery = convexQuery(api.environmentSnapshots.list, {
-    teamSlugOrId,
-    environmentId,
-  });
-  const { data: snapshotVersions } = useSuspenseQuery(snapshotsQuery);
+  const snapshotVersions =
+    useQuery(api.environmentSnapshots.list, {
+      teamSlugOrId,
+      environmentId,
+    }) ?? [];
   const deleteEnvironment = useMutation(api.environments.remove);
   const deleteSnapshotVersion = useMutation(api.environmentSnapshots.remove);
   const updatePortsMutation = useRQMutation(
-    patchApiEnvironmentsByIdPortsMutation(),
+    patchApiEnvironmentsByIdPortsMutation()
   );
   const updateEnvironmentMutation = useRQMutation(
-    patchApiEnvironmentsByIdMutation(),
+    patchApiEnvironmentsByIdMutation()
   );
   const updateDevScriptMutation = useRQMutation(
-    patchApiEnvironmentsByIdMutation(),
+    patchApiEnvironmentsByIdMutation()
   );
   const updateMaintenanceScriptMutation = useRQMutation(
-    patchApiEnvironmentsByIdMutation(),
+    patchApiEnvironmentsByIdMutation()
   );
   const activateSnapshotMutation = useRQMutation(
-    postApiEnvironmentsByIdSnapshotsBySnapshotVersionIdActivateMutation(),
+    postApiEnvironmentsByIdSnapshotsBySnapshotVersionIdActivateMutation()
   );
   const modifyVmMutation = useRQMutation(postApiSandboxesStartMutation());
   const snapshotLaunchMutation = useRQMutation(postApiSandboxesStartMutation());
   const [renameError, setRenameError] = useState<string | null>(null);
   const [isEditingPorts, setIsEditingPorts] = useState(false);
   const [portsDraft, setPortsDraft] = useState<number[]>(
-    environment.exposedPorts ?? [],
+    environment.exposedPorts ?? []
   );
   const [portInput, setPortInput] = useState("");
   const [portsError, setPortsError] = useState<string | null>(null);
   const [activatingVersionId, setActivatingVersionId] = useState<string | null>(
-    null,
+    null
   );
-  const [deletingVersionId, setDeletingVersionId] = useState<string | null>(null);
+  const [deletingVersionId, setDeletingVersionId] = useState<string | null>(
+    null
+  );
   const [isEditingDevScript, setIsEditingDevScript] = useState(false);
   const [devScriptDraft, setDevScriptDraft] = useState(
-    environment.devScript ?? "",
+    environment.devScript ?? ""
   );
   const [isEditingMaintenanceScript, setIsEditingMaintenanceScript] =
     useState(false);
   const [maintenanceScriptDraft, setMaintenanceScriptDraft] = useState(
-    environment.maintenanceScript ?? "",
+    environment.maintenanceScript ?? ""
   );
 
   const handleRenameStart = () => {
@@ -243,9 +238,7 @@ function EnvironmentDetailsPage() {
       setIsEditingDevScript(false);
     } catch (error) {
       const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to update dev script";
+        error instanceof Error ? error.message : "Failed to update dev script";
       toast.error(message);
     }
   };
@@ -264,9 +257,7 @@ function EnvironmentDetailsPage() {
 
   const handleSaveMaintenanceScript = async () => {
     const normalizedMaintenanceScript = maintenanceScriptDraft.trim();
-    if (
-      normalizedMaintenanceScript === (environment.maintenanceScript ?? "")
-    ) {
+    if (normalizedMaintenanceScript === (environment.maintenanceScript ?? "")) {
       setIsEditingMaintenanceScript(false);
       return;
     }
@@ -304,7 +295,7 @@ function EnvironmentDetailsPage() {
     const validation = validateExposedPorts([...portsDraft, parsed]);
     if (validation.reserved.length > 0) {
       setPortsError(
-        `Reserved ports cannot be exposed: ${validation.reserved.join(", ")}`,
+        `Reserved ports cannot be exposed: ${validation.reserved.join(", ")}`
       );
       return;
     }
@@ -326,7 +317,7 @@ function EnvironmentDetailsPage() {
     const validation = validateExposedPorts(portsDraft);
     if (validation.reserved.length > 0) {
       setPortsError(
-        `Reserved ports cannot be exposed: ${validation.reserved.join(", ")}`,
+        `Reserved ports cannot be exposed: ${validation.reserved.join(", ")}`
       );
       return;
     }
@@ -351,15 +342,15 @@ function EnvironmentDetailsPage() {
           setPortsError(
             error instanceof Error
               ? error.message
-              : "Failed to update exposed ports",
+              : "Failed to update exposed ports"
           );
         },
-      },
+      }
     );
   };
 
   const handleActivateSnapshot = (
-    versionId: Id<"environmentSnapshotVersions">,
+    versionId: Id<"environmentSnapshotVersions">
   ) => {
     const versionIdString = String(versionId);
     setActivatingVersionId(versionIdString);
@@ -381,17 +372,17 @@ function EnvironmentDetailsPage() {
           toast.error(
             error instanceof Error
               ? error.message
-              : "Failed to activate snapshot",
+              : "Failed to activate snapshot"
           );
         },
-      },
+      }
     );
   };
 
   const handleDelete = async () => {
     if (
       !confirm(
-        "Are you sure you want to delete this environment? This action cannot be undone.",
+        "Are you sure you want to delete this environment? This action cannot be undone."
       )
     ) {
       return;
@@ -428,11 +419,11 @@ function EnvironmentDetailsPage() {
   const isSnapshotPending = snapshotLaunchMutation.isPending;
 
   const handleDeleteSnapshotVersion = async (
-    versionId: Id<"environmentSnapshotVersions">,
+    versionId: Id<"environmentSnapshotVersions">
   ) => {
     if (
       !confirm(
-        "Are you sure you want to delete this snapshot version? This action cannot be undone.",
+        "Are you sure you want to delete this snapshot version? This action cannot be undone."
       )
     ) {
       return;
@@ -447,7 +438,12 @@ function EnvironmentDetailsPage() {
         snapshotVersionId: versionId,
       });
       toast.success("Snapshot version deleted");
-      await queryClient.invalidateQueries({ queryKey: snapshotsQuery.queryKey });
+      await queryClient.invalidateQueries({
+        queryKey: convexQuery(api.environmentSnapshots.list, {
+          teamSlugOrId,
+          environmentId,
+        }).queryKey,
+      });
     } catch (error) {
       const message =
         error instanceof Error
@@ -508,7 +504,7 @@ function EnvironmentDetailsPage() {
       {
         onSuccess: handleSandboxSuccess,
         onError: handleSandboxError,
-      },
+      }
     );
   };
 
@@ -530,7 +526,7 @@ function EnvironmentDetailsPage() {
       {
         onSuccess: handleSandboxSuccess,
         onError: handleSandboxError,
-      },
+      }
     );
   };
 
@@ -610,7 +606,7 @@ function EnvironmentDetailsPage() {
                       className={cn(
                         "inline-flex items-center gap-1.5 rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300",
                         !(isModifyPending || isSnapshotPending) &&
-                          "hover:bg-neutral-100 dark:hover:bg-neutral-900",
+                          "hover:bg-neutral-100 dark:hover:bg-neutral-900"
                       )}
                     >
                       {isModifyPending ? (
@@ -685,10 +681,11 @@ function EnvironmentDetailsPage() {
                         className={cn(
                           "inline-flex items-center gap-1 rounded-md border border-neutral-300 px-3 py-1 text-xs font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300",
                           !updateDevScriptMutation.isPending &&
-                            "hover:bg-neutral-100 dark:hover:bg-neutral-900",
+                            "hover:bg-neutral-100 dark:hover:bg-neutral-900"
                         )}
                       >
-                        {environment.devScript && environment.devScript.length > 0
+                        {environment.devScript &&
+                        environment.devScript.length > 0
                           ? "Edit"
                           : "Add"}
                       </button>
@@ -712,7 +709,9 @@ function EnvironmentDetailsPage() {
                           disabled={updateDevScriptMutation.isPending}
                           className="inline-flex h-8 items-center justify-center rounded-md bg-neutral-900 px-4 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
                         >
-                          {updateDevScriptMutation.isPending ? "Saving..." : "Save"}
+                          {updateDevScriptMutation.isPending
+                            ? "Saving..."
+                            : "Save"}
                         </button>
                         <button
                           type="button"
@@ -721,14 +720,15 @@ function EnvironmentDetailsPage() {
                           className={cn(
                             "inline-flex h-8 items-center justify-center rounded-md border border-neutral-300 px-4 text-sm font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300",
                             !updateDevScriptMutation.isPending &&
-                              "hover:bg-neutral-100 dark:hover:bg-neutral-900",
+                              "hover:bg-neutral-100 dark:hover:bg-neutral-900"
                           )}
                         >
                           Cancel
                         </button>
                       </div>
                     </div>
-                  ) : environment.devScript && environment.devScript.length > 0 ? (
+                  ) : environment.devScript &&
+                    environment.devScript.length > 0 ? (
                     <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-3 dark:bg-neutral-950">
                       <pre className="whitespace-pre-wrap break-words font-mono text-sm text-green-400">
                         {environment.devScript}
@@ -757,7 +757,7 @@ function EnvironmentDetailsPage() {
                         className={cn(
                           "inline-flex items-center gap-1 rounded-md border border-neutral-300 px-3 py-1 text-xs font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300",
                           !updateMaintenanceScriptMutation.isPending &&
-                            "hover:bg-neutral-100 dark:hover:bg-neutral-900",
+                            "hover:bg-neutral-100 dark:hover:bg-neutral-900"
                         )}
                       >
                         {environment.maintenanceScript &&
@@ -797,7 +797,7 @@ function EnvironmentDetailsPage() {
                           className={cn(
                             "inline-flex h-8 items-center justify-center rounded-md border border-neutral-300 px-4 text-sm font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300",
                             !updateMaintenanceScriptMutation.isPending &&
-                              "hover:bg-neutral-100 dark:hover:bg-neutral-900",
+                              "hover:bg-neutral-100 dark:hover:bg-neutral-900"
                           )}
                         >
                           Cancel
@@ -948,7 +948,7 @@ function EnvironmentDetailsPage() {
                         className={cn(
                           "inline-flex items-center gap-1 rounded-md border border-neutral-300 px-3 py-1 text-xs font-medium text-neutral-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300",
                           !(isSnapshotPending || isModifyPending) &&
-                            "hover:bg-neutral-100 dark:hover:bg-neutral-900",
+                            "hover:bg-neutral-100 dark:hover:bg-neutral-900"
                         )}
                       >
                         {isSnapshotPending ? (
