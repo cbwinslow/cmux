@@ -459,7 +459,7 @@ function TaskTreeInner({
     }
 
     // Expand the task if not already expanded
-    setIsExpanded((prev) => prev || true);
+    setIsExpanded(true);
 
     // Scroll into view
     const linkElement = taskLinkRef.current;
@@ -467,7 +467,7 @@ function TaskTreeInner({
       linkElement.scrollIntoView({
         block: "center",
         inline: "nearest",
-        behavior: "smooth",
+        behavior: "instant",
       });
     }
   }, [isTaskSelected]);
