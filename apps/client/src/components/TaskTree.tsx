@@ -519,9 +519,52 @@ function TaskTreeInner({
     unarchive(task._id);
   }, [unarchive, task._id]);
 
-  // Mutations for pinning/unpinning tasks
-  const pinTask = useMutation(api.tasks.pin);
-  const unpinTask = useMutation(api.tasks.unpin);
+  // Mutations for pinning/unpinning tasks with optimistic updates
+  const pinTask = useMutation(api.tasks.pin).withOptimisticUpdate(
+    (localStore, args) => {
+      const now = Date.now();
+
+      // Update the task in the main task list
+      const tasks = localStore.getQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId });
+      if (tasks) {
+        const updatedTasks = tasks.map(t =>
+          t._id === args.id ? { ...t, pinned: true, updatedAt: now } : t
+        );
+        localStore.setQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId }, updatedTasks);
+      }
+
+      // Update the pinned items query
+      const pinned = localStore.getQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId }) || [];
+      const taskToPin = tasks?.find(t => t._id === args.id);
+      if (taskToPin) {
+        // Insert at the beginning since it's the most recently updated
+        localStore.setQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId },
+          [{ ...taskToPin, pinned: true, updatedAt: now }, ...pinned]
+        );
+      }
+    }
+  );
+
+  const unpinTask = useMutation(api.tasks.unpin).withOptimisticUpdate(
+    (localStore, args) => {
+      const now = Date.now();
+
+      // Update the task in the main task list
+      const tasks = localStore.getQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId });
+      if (tasks) {
+        const updatedTasks = tasks.map(t =>
+          t._id === args.id ? { ...t, pinned: false, updatedAt: now } : t
+        );
+        localStore.setQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId }, updatedTasks);
+      }
+
+      // Update the pinned items query
+      const pinned = localStore.getQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId }) || [];
+      localStore.setQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId },
+        pinned.filter(t => t._id !== args.id)
+      );
+    }
+  );
 
   const handlePin = useCallback(() => {
     pinTask({
@@ -769,7 +812,7 @@ function TaskTreeInner({
                   onClick={handleCopyDescription}
                 >
                   <CopyIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                  <span>Copy Description</span>
+                  <span>Copy description</span>
                 </ContextMenu.Item>
                 {canRenameTask ? (
                   <ContextMenu.Item
@@ -777,7 +820,7 @@ function TaskTreeInner({
                     onClick={handleStartRenaming}
                   >
                     <Pencil className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                    <span>Rename Task</span>
+                    <span>Rename</span>
                   </ContextMenu.Item>
                 ) : null}
                 {task.pinned ? (
@@ -786,7 +829,7 @@ function TaskTreeInner({
                     onClick={handleUnpin}
                   >
                     <PinOff className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                    <span>Unpin Task</span>
+                    <span>Unpin</span>
                   </ContextMenu.Item>
                 ) : (
                   <ContextMenu.Item
@@ -794,7 +837,7 @@ function TaskTreeInner({
                     onClick={handlePin}
                   >
                     <Pin className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                    <span>Pin Task</span>
+                    <span>Pin</span>
                   </ContextMenu.Item>
                 )}
                 <ContextMenu.SubmenuRoot>
@@ -860,7 +903,7 @@ function TaskTreeInner({
                     onClick={handleUnarchive}
                   >
                     <ArchiveRestoreIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                    <span>Unarchive Task</span>
+                    <span>Unarchive</span>
                   </ContextMenu.Item>
                 ) : (
                   <ContextMenu.Item
@@ -868,7 +911,7 @@ function TaskTreeInner({
                     onClick={handleArchive}
                   >
                     <ArchiveIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                    <span>Archive Task</span>
+                    <span>Archive</span>
                   </ContextMenu.Item>
                 )}
               </ContextMenu.Popup>
@@ -1142,23 +1185,6 @@ function TaskRunTreeInner({
     onArchiveToggle(run._id, true);
   }, [onArchiveToggle, run._id]);
 
-  // Mutations for pinning/unpinning task runs
-  const pinTaskRun = useMutation(api.taskRuns.pin);
-  const unpinTaskRun = useMutation(api.taskRuns.unpin);
-
-  const handlePinRun = useCallback(() => {
-    pinTaskRun({
-      teamSlugOrId,
-      id: run._id,
-    });
-  }, [pinTaskRun, teamSlugOrId, run._id]);
-
-  const handleUnpinRun = useCallback(() => {
-    unpinTaskRun({
-      teamSlugOrId,
-      id: run._id,
-    });
-  }, [unpinTaskRun, teamSlugOrId, run._id]);
 
   const isLocalWorkspaceRunEntry = run.isLocalWorkspace;
   const isCloudWorkspaceRunEntry = run.isCloudWorkspace;
@@ -1479,29 +1505,12 @@ function TaskRunTreeInner({
                   </ContextMenu.Positioner>
                 </ContextMenu.SubmenuRoot>
               ) : null}
-              {run.pinned ? (
-                <ContextMenu.Item
-                  className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
-                  onClick={handleUnpinRun}
-                >
-                  <PinOff className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                  <span>Unpin Run</span>
-                </ContextMenu.Item>
-              ) : (
-                <ContextMenu.Item
-                  className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
-                  onClick={handlePinRun}
-                >
-                  <Pin className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                  <span>Pin Run</span>
-                </ContextMenu.Item>
-              )}
               <ContextMenu.Item
                 className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
                 onClick={handleArchiveRun}
               >
                 <ArchiveIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                <span>Hide run</span>
+                <span>Hide</span>
               </ContextMenu.Item>
             </ContextMenu.Popup>
           </ContextMenu.Positioner>

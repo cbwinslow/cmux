@@ -125,23 +125,17 @@ export const TaskList = memo(function TaskList({
   const categorizedTasks = useMemo(() => {
     const categorized = categorizeTasks(allTasks);
     if (categorized && pinnedData) {
-      // Add pinned tasks to the pinned category
-      // Filter out pinned tasks from other categories to avoid duplicates
-      const pinnedTaskIds = new Set(pinnedData.tasks.map(t => t._id));
-      const pinnedRunTaskIds = new Set(pinnedData.taskRuns.map(r => r.taskId));
-
-      // Combine pinned tasks and tasks from pinned runs
-      const allPinnedTaskIds = new Set([...pinnedTaskIds, ...pinnedRunTaskIds]);
-
       // Filter pinned tasks out from other categories
+      const pinnedTaskIds = new Set(pinnedData.map(t => t._id));
+
       for (const key of CATEGORY_ORDER) {
         if (key !== 'pinned') {
-          categorized[key] = categorized[key].filter(t => !allPinnedTaskIds.has(t._id));
+          categorized[key] = categorized[key].filter(t => !pinnedTaskIds.has(t._id));
         }
       }
 
-      // Add all pinned tasks to the pinned category
-      categorized.pinned = pinnedData.tasks;
+      // Add pinned tasks to the pinned category (already sorted by the API)
+      categorized.pinned = pinnedData;
     }
     return categorized;
   }, [allTasks, pinnedData]);

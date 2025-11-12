@@ -273,31 +273,6 @@ export function Sidebar({ tasks, teamSlugOrId }: SidebarProps) {
             ))}
           </ul>
 
-          {/* Pinned Items Section - only show if there are pinned items */}
-          {pinnedData && (pinnedData.tasks.length > 0 || pinnedData.taskRuns.length > 0) && (
-            <div className="mt-4 flex flex-col">
-              <SidebarSectionLink
-                to="/$teamSlugOrId/dashboard"
-                params={{ teamSlugOrId }}
-                exact={false}
-              >
-                Pinned
-              </SidebarSectionLink>
-              <div className="ml-2 pt-px">
-                <div className="space-y-px">
-                  {pinnedData.tasks.map((task) => (
-                    <TaskTree
-                      key={task._id}
-                      task={task}
-                      defaultExpanded={expandTaskIds?.includes(task._id) ?? false}
-                      teamSlugOrId={teamSlugOrId}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
           <div className="mt-4 flex flex-col">
             <SidebarSectionLink
               to="/$teamSlugOrId/prs"
@@ -326,16 +301,37 @@ export function Sidebar({ tasks, teamSlugOrId }: SidebarProps) {
               {tasks === undefined ? (
                 <TaskTreeSkeleton count={5} />
               ) : tasks && tasks.length > 0 ? (
-                tasks
-                  .filter((task) => !task.pinned) // Filter out pinned tasks to avoid duplicates
-                  .map((task) => (
-                    <TaskTree
-                      key={task._id}
-                      task={task}
-                      defaultExpanded={expandTaskIds?.includes(task._id) ?? false}
-                      teamSlugOrId={teamSlugOrId}
-                    />
-                  ))
+                <>
+                  {/* Pinned items at the top */}
+                  {pinnedData && pinnedData.length > 0 && (
+                    <>
+                      {pinnedData.map((task) => (
+                        <TaskTree
+                          key={task._id}
+                          task={task}
+                          defaultExpanded={expandTaskIds?.includes(task._id) ?? false}
+                          teamSlugOrId={teamSlugOrId}
+                        />
+                      ))}
+                      {/* Horizontal divider after pinned items */}
+                      <hr className="mx-2 border-t border-neutral-200 dark:border-neutral-800" />
+                    </>
+                  )}
+                  {/* Regular (non-pinned) tasks */}
+                  {tasks
+                    .filter((task) => {
+                      // Only filter out directly pinned tasks
+                      return !task.pinned;
+                    })
+                    .map((task) => (
+                      <TaskTree
+                        key={task._id}
+                        task={task}
+                        defaultExpanded={expandTaskIds?.includes(task._id) ?? false}
+                        teamSlugOrId={teamSlugOrId}
+                      />
+                    ))}
+                </>
               ) : (
                 <p className="pl-2 pr-3 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 select-none">
                   No recent tasks

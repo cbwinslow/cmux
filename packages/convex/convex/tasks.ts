@@ -55,30 +55,7 @@ export const getPinned = authQuery({
       .filter((q) => q.neq(q.field("isArchived"), true))
       .collect();
 
-    // Get pinned task runs
-    const pinnedRuns = await ctx.db
-      .query("taskRuns")
-      .withIndex("by_pinned", (idx) =>
-        idx.eq("pinned", true).eq("teamId", teamId).eq("userId", userId),
-      )
-      .filter((q) => q.neq(q.field("isArchived"), true))
-      .collect();
-
-    // For each pinned run, get its associated task
-    const tasksForRuns = await Promise.all(
-      pinnedRuns.map(async (run) => {
-        const task = await ctx.db.get(run.taskId);
-        return { run, task };
-      }),
-    );
-
-    return {
-      tasks: pinnedTasks.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)),
-      taskRuns: tasksForRuns
-        .filter(({ task }) => task !== null)
-        .map(({ run, task }) => ({ ...run, task }))
-        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)),
-    };
+    return pinnedTasks.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   },
 });
 

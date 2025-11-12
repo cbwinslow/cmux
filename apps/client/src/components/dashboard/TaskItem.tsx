@@ -74,9 +74,52 @@ export const TaskItem = memo(function TaskItem({
   // Mutation for toggling keep-alive status
   const toggleKeepAlive = useMutation(api.taskRuns.toggleKeepAlive);
 
-  // Mutations for pinning/unpinning tasks
-  const pinTask = useMutation(api.tasks.pin);
-  const unpinTask = useMutation(api.tasks.unpin);
+  // Mutations for pinning/unpinning tasks with optimistic updates
+  const pinTask = useMutation(api.tasks.pin).withOptimisticUpdate(
+    (localStore, args) => {
+      const now = Date.now();
+
+      // Update the task in the main task list
+      const tasks = localStore.getQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId });
+      if (tasks) {
+        const updatedTasks = tasks.map(t =>
+          t._id === args.id ? { ...t, pinned: true, updatedAt: now } : t
+        );
+        localStore.setQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId }, updatedTasks);
+      }
+
+      // Update the pinned items query
+      const pinned = localStore.getQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId }) || [];
+      const taskToPin = tasks?.find(t => t._id === args.id);
+      if (taskToPin) {
+        // Insert at the beginning since it's the most recently updated
+        localStore.setQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId },
+          [{ ...taskToPin, pinned: true, updatedAt: now }, ...pinned]
+        );
+      }
+    }
+  );
+
+  const unpinTask = useMutation(api.tasks.unpin).withOptimisticUpdate(
+    (localStore, args) => {
+      const now = Date.now();
+
+      // Update the task in the main task list
+      const tasks = localStore.getQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId });
+      if (tasks) {
+        const updatedTasks = tasks.map(t =>
+          t._id === args.id ? { ...t, pinned: false, updatedAt: now } : t
+        );
+        localStore.setQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId }, updatedTasks);
+      }
+
+      // Update the pinned items query
+      const pinned = localStore.getQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId }) || [];
+      localStore.setQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId },
+        pinned.filter(t => t._id !== args.id)
+      );
+    }
+  );
 
   // Find the latest task run with a VSCode instance
   const getLatestVSCodeInstance = useCallback(() => {
@@ -355,7 +398,7 @@ export const TaskItem = memo(function TaskItem({
                 onClick={handleCopyFromMenu}
               >
                 <Copy className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                <span>Copy Description</span>
+                <span>Copy description</span>
               </ContextMenu.Item>
               {canRename ? (
                 <ContextMenu.Item
@@ -363,7 +406,7 @@ export const TaskItem = memo(function TaskItem({
                   onClick={handleStartRenaming}
                 >
                   <Pencil className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                  <span>Rename Task</span>
+                  <span>Rename</span>
                 </ContextMenu.Item>
               ) : null}
               {task.pinned ? (
@@ -372,7 +415,7 @@ export const TaskItem = memo(function TaskItem({
                   onClick={handleUnpinFromMenu}
                 >
                   <PinOff className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                  <span>Unpin Task</span>
+                  <span>Unpin</span>
                 </ContextMenu.Item>
               ) : (
                 <ContextMenu.Item
@@ -380,7 +423,7 @@ export const TaskItem = memo(function TaskItem({
                   onClick={handlePinFromMenu}
                 >
                   <Pin className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                  <span>Pin Task</span>
+                  <span>Pin</span>
                 </ContextMenu.Item>
               )}
               {task.isArchived ? (
@@ -389,7 +432,7 @@ export const TaskItem = memo(function TaskItem({
                   onClick={handleUnarchiveFromMenu}
                 >
                   <ArchiveRestore className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                  <span>Unarchive Task</span>
+                  <span>Unarchive</span>
                 </ContextMenu.Item>
               ) : (
                 <ContextMenu.Item
@@ -397,7 +440,7 @@ export const TaskItem = memo(function TaskItem({
                   onClick={handleArchiveFromMenu}
                 >
                   <Archive className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                  <span>Archive Task</span>
+                  <span>Archive</span>
                 </ContextMenu.Item>
               )}
             </ContextMenu.Popup>
