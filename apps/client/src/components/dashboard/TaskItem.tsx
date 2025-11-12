@@ -268,7 +268,7 @@ export const TaskItem = memo(function TaskItem({
                   )}
                 />
               ) : (
-                <span className="text-[13px] font-medium truncate min-w-0">
+                <span className="text-[13px] font-medium truncate min-w-0 pr-1">
                   {task.text}
                 </span>
               )}
