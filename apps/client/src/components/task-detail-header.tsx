@@ -34,6 +34,7 @@ import {
   Copy,
   Crown,
   ExternalLink,
+  FolderOpen,
   GitBranch,
   GitMerge,
   Settings,
@@ -70,6 +71,7 @@ interface TaskDetailHeaderProps {
   onExpandAllChecks?: () => void;
   onCollapseAllChecks?: () => void;
   onPanelSettings?: () => void;
+  onOpenLocalWorkspace?: () => void;
   teamSlugOrId: string;
 }
 
@@ -205,6 +207,7 @@ export function TaskDetailHeader({
   onExpandAllChecks,
   onCollapseAllChecks,
   onPanelSettings,
+  onOpenLocalWorkspace,
   teamSlugOrId,
 }: TaskDetailHeaderProps) {
   const navigate = useNavigate();
@@ -356,6 +359,17 @@ export function TaskDetailHeader({
           </Suspense>
 
           <OpenEditorSplitButton worktreePath={worktreePath} />
+
+          {onOpenLocalWorkspace && (
+            <button
+              onClick={onOpenLocalWorkspace}
+              className="p-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-white select-none"
+              aria-label="Open local workspace"
+              title="Open local workspace from this branch"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           {onPanelSettings && (
             <button
@@ -635,7 +649,11 @@ function SocketActions({
     }>,
   ) => {
     prs.forEach((pr) => {
-      if (pr.repoFullName && pr.number) {
+      // Open GitHub URL directly in new tab if available
+      if (pr.url) {
+        window.open(pr.url, '_blank', 'noopener,noreferrer');
+      } else if (pr.repoFullName && pr.number) {
+        // Fallback to internal viewer if URL not available
         const [owner = "", repo = ""] = pr.repoFullName.split("/", 2);
         navigate({
           to: "/$teamSlugOrId/prs-only/$owner/$repo/$number",
@@ -703,11 +721,17 @@ function SocketActions({
     },
     onSuccess: (response, _variables, context) => {
       const actionable = response.results.filter(
-        (result) => result.url && !result.error,
+        (result) =>
+          !result.error &&
+          Boolean(result.repoFullName?.trim()) &&
+          Boolean(result.number),
       );
-      if (actionable.length > 0) {
-        navigateToPrs(actionable);
-      }
+
+      // Get the PR URL(s) for copying
+      const prUrls = actionable
+        .map((result) => result.url)
+        .filter((url): url is string => Boolean(url));
+
       toast.success(openedLabel, {
         id: context?.toastId,
         description: summarizeResults(response.results),
@@ -716,6 +740,23 @@ function SocketActions({
             ? {
               label: actionable.length === 1 ? "View PR" : "View PRs",
               onClick: () => navigateToPrs(actionable),
+            }
+            : undefined,
+        cancel:
+          prUrls.length > 0
+            ? {
+              label: "Copy URL",
+              onClick: () => {
+                const urlText = prUrls.join("\n");
+                navigator.clipboard
+                  .writeText(urlText)
+                  .then(() => {
+                    toast.success("URL copied to clipboard");
+                  })
+                  .catch(() => {
+                    toast.error("Failed to copy URL");
+                  });
+              },
             }
             : undefined,
       });
@@ -924,7 +965,11 @@ function SocketActions({
                   key={repoName}
                   disabled={!hasUrl}
                   onClick={() => {
-                    if (pr?.repoFullName && pr?.number) {
+                    // Open GitHub URL directly in new tab if available
+                    if (pr?.url) {
+                      window.open(pr.url, '_blank', 'noopener,noreferrer');
+                    } else if (pr?.repoFullName && pr?.number) {
+                      // Fallback to internal viewer if URL not available
                       const [owner = "", repo = ""] =
                         pr.repoFullName.split("/", 2);
                       navigate({

@@ -1,13 +1,9 @@
 import { api } from "@cmux/convex/api";
 import { typedZid } from "@cmux/shared/utils/typed-zid";
 import { convexQuery } from "@convex-dev/react-query";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery as useConvexQuery } from "convex/react";
 import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, X } from "lucide-react";
@@ -163,14 +159,12 @@ function getTabRemovalOutcome(
 
 function TaskRunTerminals() {
   const { runId: taskRunId, teamSlugOrId } = Route.useParams();
-  const taskRun = useSuspenseQuery(
-    convexQuery(api.taskRuns.get, {
-      teamSlugOrId,
-      id: taskRunId,
-    })
-  );
+  const taskRun = useConvexQuery(api.taskRuns.get, {
+    teamSlugOrId,
+    id: taskRunId,
+  });
 
-  const vscodeInfo = taskRun?.data?.vscode;
+  const vscodeInfo = taskRun?.vscode;
   const rawMorphUrl = vscodeInfo?.url ?? vscodeInfo?.workspaceUrl ?? null;
   const isMorphProvider = vscodeInfo?.provider === "morph";
 
@@ -317,6 +311,24 @@ function TaskRunTerminals() {
         ? "Unable to close terminal."
         : null;
 
+  const closeTerminalTab = useCallback(
+    (tabId: TerminalTabId) => {
+      if (
+        (isDeletingTerminal && deletingTerminalId === tabId) ||
+        !hasTerminalBackend
+      ) {
+        return;
+      }
+      deleteTerminalMutation.mutate(tabId);
+    },
+    [
+      deleteTerminalMutation,
+      deletingTerminalId,
+      hasTerminalBackend,
+      isDeletingTerminal,
+    ]
+  );
+
   useEffect(() => {
     if (!hasTerminalBackend || terminalIds.length === 0) {
       setActiveTerminalId(null);
@@ -405,6 +417,14 @@ function TaskRunTerminals() {
                     <button
                       type="button"
                       onClick={() => setActiveTerminalId(id)}
+                      onMouseDown={(event) => {
+                        if (event.button !== 1) {
+                          return;
+                        }
+                        event.preventDefault();
+                        event.stopPropagation();
+                        closeTerminalTab(id);
+                      }}
                       className={clsx(
                         "flex items-center gap-2 rounded-md pl-3 pr-8 py-1.5 text-xs font-medium transition-colors",
                         isActive
@@ -428,10 +448,7 @@ function TaskRunTerminals() {
                       onClick={(event) => {
                         event.stopPropagation();
                         event.preventDefault();
-                        if (isDeletingThis || !hasTerminalBackend) {
-                          return;
-                        }
-                        deleteTerminalMutation.mutate(id);
+                        closeTerminalTab(id);
                       }}
                       disabled={isDeletingThis}
                       className={clsx(

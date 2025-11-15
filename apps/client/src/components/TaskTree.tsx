@@ -7,6 +7,7 @@ import {
 import { convexQueryClient } from "@/contexts/convex/convex-query-client";
 import { useArchiveTask } from "@/hooks/useArchiveTask";
 import { useOpenWithActions } from "@/hooks/useOpenWithActions";
+import { useTaskRename } from "@/hooks/useTaskRename";
 import { isElectron } from "@/lib/electron";
 import { isFakeConvexId } from "@/lib/fakeConvexId";
 import type { AnnotatedTaskRun, TaskRunWithChildren } from "@/types/task";
@@ -18,9 +19,9 @@ import {
   aggregatePullRequestState,
   type RunPullRequestState,
 } from "@cmux/shared/pull-request-state";
-import { Link, useLocation, type LinkProps } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, type LinkProps } from "@tanstack/react-router";
 import clsx from "clsx";
-import { useMutation, useQuery as useConvexQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -44,8 +45,12 @@ import {
   Globe,
   Monitor,
   Pencil,
+  Pin,
+  PinOff,
+  Plus,
   TerminalSquare,
   Loader2,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import {
@@ -58,14 +63,11 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
   type FocusEvent,
-  type KeyboardEvent,
   type MouseEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
-import { flushSync } from "react-dom";
 import { VSCodeIcon } from "./icons/VSCodeIcon";
 import { SidebarListItem } from "./sidebar/SidebarListItem";
 import { annotateAgentOrdinals } from "./task-tree/annotateAgentOrdinals";
@@ -107,11 +109,42 @@ interface TaskTreeProps {
   teamSlugOrId: string;
 }
 
-type TasksGetArgs = {
-  teamSlugOrId: string;
-  projectFullName?: string;
-  archived?: boolean;
-};
+interface SidebarArchiveOverlayProps {
+  icon: ReactNode;
+  label: string;
+  onArchive: () => void;
+}
+
+function SidebarArchiveOverlay({
+  icon,
+  label,
+  onArchive,
+}: SidebarArchiveOverlayProps) {
+  return (
+    <div className="relative flex h-4 w-4 items-center justify-center">
+      <Tooltip delayDuration={0}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={label}
+            className="peer absolute inset-0 flex items-center justify-center rounded-sm text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-50 opacity-0 pointer-events-none focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:opacity-100 group-hover:pointer-events-auto group-data-[focus-visible=true]:opacity-100 group-data-[focus-visible=true]:pointer-events-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 dark:focus-visible:outline-neutral-500"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onArchive();
+            }}
+          >
+            <ArchiveIcon className="w-3 h-3" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">{label}</TooltipContent>
+      </Tooltip>
+      <div className="flex items-center justify-center group-hover:pointer-events-none group-hover:opacity-0 group-data-[focus-visible=true]:pointer-events-none group-data-[focus-visible=true]:opacity-0 peer-focus-visible:pointer-events-none peer-focus-visible:opacity-0">
+        {icon}
+      </div>
+    </div>
+  );
+}
 
 // Extract the display text logic to avoid re-creating it on every render
 function getRunDisplayText(run: TaskRunWithChildren): string {
@@ -311,7 +344,7 @@ function TaskTreeInner({
   );
   const isOptimisticTask = isFakeConvexId(task._id);
   const canRenameTask = !isOptimisticTask;
-  const taskRuns = useConvexQuery(
+  const taskRuns = useQuery(
     api.taskRuns.getByTask,
     isOptimisticTask
       ? "skip"
@@ -336,6 +369,7 @@ function TaskTreeInner({
     [flattenedRuns]
   );
   const prefetched = useRef(false);
+  const taskLinkRef = useRef<HTMLAnchorElement | null>(null);
   const prefetchTaskRuns = useCallback(() => {
     if (prefetched.current || isOptimisticTask) {
       return;
@@ -422,90 +456,56 @@ function TaskTreeInner({
     prefetchTaskRuns();
   }, [prefetchTaskRuns]);
 
-  const { archiveWithUndo, unarchive } = useArchiveTask(teamSlugOrId);
-  const updateTaskMutation = useMutation(api.tasks.update).withOptimisticUpdate(
-    (localStore, args) => {
-      const optimisticUpdatedAt = Date.now();
-      const applyUpdateToList = (keyArgs: TasksGetArgs) => {
-        const list = localStore.getQuery(api.tasks.get, keyArgs);
-        if (!list) {
-          return;
-        }
-        const index = list.findIndex((item) => item._id === args.id);
-        if (index === -1) {
-          return;
-        }
-        const next = list.slice();
-        next[index] = {
-          ...next[index],
-          text: args.text,
-          updatedAt: optimisticUpdatedAt,
-        };
-        localStore.setQuery(api.tasks.get, keyArgs, next);
-      };
-
-      const listVariants: TasksGetArgs[] = [
-        { teamSlugOrId: args.teamSlugOrId },
-        { teamSlugOrId: args.teamSlugOrId, archived: false },
-        { teamSlugOrId: args.teamSlugOrId, archived: true },
-      ];
-
-      listVariants.forEach(applyUpdateToList);
-
-      const detailArgs = { teamSlugOrId: args.teamSlugOrId, id: args.id };
-      const existingDetail = localStore.getQuery(api.tasks.getById, detailArgs);
-      if (existingDetail) {
-        localStore.setQuery(api.tasks.getById, detailArgs, {
-          ...existingDetail,
-          text: args.text,
-          updatedAt: optimisticUpdatedAt,
-        });
-      }
-    }
-  );
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(task.text ?? "");
-  const [renameError, setRenameError] = useState<string | null>(null);
-  const [isRenamePending, setIsRenamePending] = useState(false);
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const pendingRenameFocusFrame = useRef<number | null>(null);
-  const renameInputHasFocusedRef = useRef(false);
-
-  const focusRenameInput = useCallback(() => {
-    if (typeof window === "undefined") {
-      renameInputRef.current?.focus();
-      renameInputRef.current?.select();
+  // Expand and scroll into view when task becomes selected
+  useEffect(() => {
+    if (!isTaskSelected) {
       return;
     }
-    if (pendingRenameFocusFrame.current !== null) {
-      window.cancelAnimationFrame(pendingRenameFocusFrame.current);
+
+    // Expand the task if not already expanded
+    setIsExpanded(true);
+
+    // Scroll into view
+    const linkElement = taskLinkRef.current;
+    if (linkElement) {
+      linkElement.scrollIntoView({
+        block: "center",
+        inline: "nearest",
+        behavior: "instant",
+      });
     }
-    pendingRenameFocusFrame.current = window.requestAnimationFrame(() => {
-      pendingRenameFocusFrame.current = null;
-      const input = renameInputRef.current;
-      if (!input) {
-        return;
-      }
-      input.focus();
-      input.select();
-    });
+  }, [isTaskSelected]);
+  const [isTaskLinkFocusVisible, setIsTaskLinkFocusVisible] = useState(false);
+  const handleTaskLinkFocus = useCallback(
+    (event: FocusEvent<HTMLAnchorElement>) => {
+      handlePrefetch();
+      setIsTaskLinkFocusVisible(event.currentTarget.matches(":focus-visible"));
+    },
+    [handlePrefetch]
+  );
+  const handleTaskLinkBlur = useCallback(() => {
+    setIsTaskLinkFocusVisible(false);
   }, []);
 
-  useEffect(
-    () => () => {
-      if (pendingRenameFocusFrame.current !== null) {
-        window.cancelAnimationFrame(pendingRenameFocusFrame.current);
-        pendingRenameFocusFrame.current = null;
-      }
-    },
-    []
-  );
+  const { archiveWithUndo, unarchive } = useArchiveTask(teamSlugOrId);
 
-  useEffect(() => {
-    if (!isRenaming) {
-      setRenameValue(task.text ?? "");
-    }
-  }, [isRenaming, task.text]);
+  const {
+    isRenaming,
+    renameValue,
+    renameError,
+    isRenamePending,
+    renameInputRef,
+    handleRenameChange,
+    handleRenameKeyDown,
+    handleRenameBlur,
+    handleRenameFocus,
+    handleStartRenaming,
+  } = useTaskRename({
+    taskId: task._id,
+    teamSlugOrId,
+    currentText: task.text ?? "",
+    canRename: canRenameTask,
+  });
 
   const handleCopyDescription = useCallback(() => {
     if (navigator?.clipboard?.writeText) {
@@ -521,112 +521,66 @@ function TaskTreeInner({
     unarchive(task._id);
   }, [unarchive, task._id]);
 
-  const handleRenameChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      setRenameValue(event.target.value);
-      if (renameError) {
-        setRenameError(null);
+  // Mutations for pinning/unpinning tasks with optimistic updates
+  const pinTask = useMutation(api.tasks.pin).withOptimisticUpdate(
+    (localStore, args) => {
+      const now = Date.now();
+
+      // Update the task in the main task list
+      const tasks = localStore.getQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId });
+      if (tasks) {
+        const updatedTasks = tasks.map(t =>
+          t._id === args.id ? { ...t, pinned: true, updatedAt: now } : t
+        );
+        localStore.setQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId }, updatedTasks);
       }
-    },
-    [renameError]
+
+      // Update the pinned items query
+      const pinned = localStore.getQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId }) || [];
+      const taskToPin = tasks?.find(t => t._id === args.id);
+      if (taskToPin) {
+        // Insert at the beginning since it's the most recently updated
+        localStore.setQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId },
+          [{ ...taskToPin, pinned: true, updatedAt: now }, ...pinned]
+        );
+      }
+    }
   );
 
-  const handleRenameCancel = useCallback(() => {
-    setRenameValue(task.text ?? "");
-    setRenameError(null);
-    setIsRenaming(false);
-  }, [task.text]);
+  const unpinTask = useMutation(api.tasks.unpin).withOptimisticUpdate(
+    (localStore, args) => {
+      const now = Date.now();
 
-  const handleRenameSubmit = useCallback(async () => {
-    if (!canRenameTask) {
-      setIsRenaming(false);
-      return;
-    }
-    if (isRenamePending) {
-      return;
-    }
-    const trimmed = renameValue.trim();
-    if (!trimmed) {
-      setRenameError("Task name is required.");
-      renameInputRef.current?.focus();
-      return;
-    }
-    const current = (task.text ?? "").trim();
-    if (trimmed === current) {
-      setIsRenaming(false);
-      setRenameError(null);
-      return;
-    }
-    setIsRenamePending(true);
-    try {
-      await updateTaskMutation({
-        teamSlugOrId,
-        id: task._id,
-        text: trimmed,
-      });
-      setIsRenaming(false);
-      setRenameError(null);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to rename task.";
-      setRenameError(message);
-      toast.error(message);
-      renameInputRef.current?.focus();
-    } finally {
-      setIsRenamePending(false);
-    }
-  }, [
-    canRenameTask,
-    isRenamePending,
-    renameValue,
-    task._id,
-    task.text,
-    teamSlugOrId,
-    updateTaskMutation,
-  ]);
+      // Update the task in the main task list
+      const tasks = localStore.getQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId });
+      if (tasks) {
+        const updatedTasks = tasks.map(t =>
+          t._id === args.id ? { ...t, pinned: false, updatedAt: now } : t
+        );
+        localStore.setQuery(api.tasks.get, { teamSlugOrId: args.teamSlugOrId }, updatedTasks);
+      }
 
-  const handleRenameKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLInputElement>) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        void handleRenameSubmit();
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        handleRenameCancel();
-      }
-    },
-    [handleRenameCancel, handleRenameSubmit]
+      // Update the pinned items query
+      const pinned = localStore.getQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId }) || [];
+      localStore.setQuery(api.tasks.getPinned, { teamSlugOrId: args.teamSlugOrId },
+        pinned.filter(t => t._id !== args.id)
+      );
+    }
   );
 
-  const handleRenameBlur = useCallback(() => {
-    if (!renameInputHasFocusedRef.current) {
-      focusRenameInput();
-      return;
-    }
-    void handleRenameSubmit();
-  }, [focusRenameInput, handleRenameSubmit]);
-
-  const handleRenameFocus = useCallback(
-    (event: FocusEvent<HTMLInputElement>) => {
-      renameInputHasFocusedRef.current = true;
-      event.currentTarget.select();
-    },
-    []
-  );
-
-  const handleStartRenaming = useCallback(() => {
-    if (!canRenameTask) {
-      return;
-    }
-    flushSync(() => {
-      setRenameValue(task.text ?? "");
-      setRenameError(null);
-      setIsRenaming(true);
+  const handlePin = useCallback(() => {
+    pinTask({
+      teamSlugOrId,
+      id: task._id,
     });
-    renameInputHasFocusedRef.current = false;
-    focusRenameInput();
-  }, [canRenameTask, focusRenameInput, task.text]);
+  }, [pinTask, teamSlugOrId, task._id]);
+
+  const handleUnpin = useCallback(() => {
+    unpinTask({
+      teamSlugOrId,
+      id: task._id,
+    });
+  }, [unpinTask, teamSlugOrId, task._id]);
 
   const inferredBranch = getTaskBranch(task);
   const trimmedTaskText = (task.text ?? "").trim();
@@ -782,19 +736,36 @@ function TaskTreeInner({
     );
   })();
 
+  const shouldShowTaskArchiveOverlay =
+    !task.isArchived &&
+    (Boolean(taskLeadingIcon) || isLocalWorkspace || isCloudWorkspace);
+
+  const taskMetaIcon = shouldShowTaskArchiveOverlay ? (
+    <SidebarArchiveOverlay
+      icon={taskLeadingIcon}
+      label="Archive"
+      onArchive={handleArchive}
+    />
+  ) : (
+    taskLeadingIcon
+  );
+
   return (
     <TaskRunExpansionContext.Provider value={expansionContextValue}>
       <div className="select-none flex flex-col">
         <ContextMenu.Root>
           <ContextMenu.Trigger>
             <Link
+              ref={taskLinkRef}
               to="/$teamSlugOrId/task/$taskId"
               params={{ teamSlugOrId, taskId: task._id }}
               search={{ runId: undefined }}
               activeOptions={{ exact: true }}
               className="group block"
+              data-focus-visible={isTaskLinkFocusVisible ? "true" : undefined}
               onMouseEnter={handlePrefetch}
-              onFocus={handlePrefetch}
+              onFocus={handleTaskLinkFocus}
+              onBlur={handleTaskLinkBlur}
               onClick={(event) => {
                 if (
                   event.defaultPrevented ||
@@ -822,7 +793,7 @@ function TaskTreeInner({
                 title={taskTitleContent}
                 titleClassName={taskTitleClassName}
                 secondary={taskSecondary || undefined}
-                meta={taskLeadingIcon || undefined}
+                meta={taskMetaIcon || undefined}
                 className={clsx(isRenaming && "pr-2")}
               />
             </Link>
@@ -838,25 +809,39 @@ function TaskTreeInner({
           <ContextMenu.Portal>
             <ContextMenu.Positioner className="outline-none z-[var(--z-context-menu)]">
               <ContextMenu.Popup className="origin-[var(--transform-origin)] rounded-md bg-white dark:bg-neutral-800 py-1 text-neutral-900 dark:text-neutral-100 shadow-lg shadow-gray-200 outline-1 outline-neutral-200 transition-[opacity] data-[ending-style]:opacity-0 dark:shadow-none dark:-outline-offset-1 dark:outline-neutral-700">
-                {canRenameTask ? (
-                  <>
-                    <ContextMenu.Item
-                      className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
-                      onClick={handleStartRenaming}
-                    >
-                      <Pencil className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                      <span>Rename Task</span>
-                    </ContextMenu.Item>
-                    <div className="my-1 h-px bg-neutral-200 dark:bg-neutral-700" />
-                  </>
-                ) : null}
                 <ContextMenu.Item
                   className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
                   onClick={handleCopyDescription}
                 >
                   <CopyIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                  <span>Copy Description</span>
+                  <span>Copy description</span>
                 </ContextMenu.Item>
+                {canRenameTask ? (
+                  <ContextMenu.Item
+                    className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
+                    onClick={handleStartRenaming}
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
+                    <span>Rename</span>
+                  </ContextMenu.Item>
+                ) : null}
+                {task.pinned ? (
+                  <ContextMenu.Item
+                    className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
+                    onClick={handleUnpin}
+                  >
+                    <PinOff className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
+                    <span>Unpin</span>
+                  </ContextMenu.Item>
+                ) : (
+                  <ContextMenu.Item
+                    className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
+                    onClick={handlePin}
+                  >
+                    <Pin className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
+                    <span>Pin</span>
+                  </ContextMenu.Item>
+                )}
                 <ContextMenu.SubmenuRoot>
                   <ContextMenu.SubmenuTrigger className="flex items-center gap-2 cursor-default py-1.5 pr-4 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700">
                     <ArchiveIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
@@ -864,7 +849,7 @@ function TaskTreeInner({
                     <ChevronRight className="w-3 h-3 ml-auto text-neutral-400 dark:text-neutral-500" />
                   </ContextMenu.SubmenuTrigger>
                   <ContextMenu.Positioner className="outline-none z-[var(--z-context-menu)]">
-                    <ContextMenu.Popup className="origin-[var(--transform-origin)] rounded-md bg-white dark:bg-neutral-800 py-1 text-neutral-900 dark:text-neutral-100 shadow-lg shadow-gray-200 outline-1 outline-neutral-200 transition-[opacity] data-[ending-style]:opacity-0 dark:shadow-none dark:-outline-offset-1 dark:outline-neutral-700 max-w-xs">
+                    <ContextMenu.Popup className="origin-[var(--transform-origin)] rounded-md bg-white dark:bg-neutral-800 py-1 text-neutral-900 dark:text-neutral-100 shadow-lg shadow-gray-200 outline-1 outline-neutral-200 data-[ending-style]:transition-[opacity] data-[ending-style]:duration-100 data-[ending-style]:ease-out data-[ending-style]:opacity-0 dark:shadow-none dark:-outline-offset-1 dark:outline-neutral-700 max-w-xs">
                       {runsLoading ? (
                         <div className="flex items-center gap-2 px-3 py-2 text-xs text-neutral-500 dark:text-neutral-400">
                           <Loader2 className="w-3 h-3 animate-spin text-neutral-400" />
@@ -920,7 +905,7 @@ function TaskTreeInner({
                     onClick={handleUnarchive}
                   >
                     <ArchiveRestoreIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                    <span>Unarchive Task</span>
+                    <span>Unarchive</span>
                   </ContextMenu.Item>
                 ) : (
                   <ContextMenu.Item
@@ -928,7 +913,7 @@ function TaskTreeInner({
                     onClick={handleArchive}
                   >
                     <ArchiveIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                    <span>Archive Task</span>
+                    <span>Archive</span>
                   </ContextMenu.Item>
                 )}
               </ContextMenu.Popup>
@@ -1202,6 +1187,7 @@ function TaskRunTreeInner({
     onArchiveToggle(run._id, true);
   }, [onArchiveToggle, run._id]);
 
+
   const isLocalWorkspaceRunEntry = run.isLocalWorkspace;
   const isCloudWorkspaceRunEntry = run.isCloudWorkspace;
 
@@ -1304,6 +1290,22 @@ function TaskRunTreeInner({
 
   const runLeadingIcon = pullRequestIcon ?? statusIconWithTooltip;
 
+  const shouldShowRunArchiveOverlay =
+    !run.isArchived &&
+    (Boolean(runLeadingIcon) ||
+      isLocalWorkspaceRunEntry ||
+      isCloudWorkspaceRunEntry);
+
+  const runMetaIcon = shouldShowRunArchiveOverlay ? (
+    <SidebarArchiveOverlay
+      icon={runLeadingIcon}
+      label="Archive"
+      onArchive={handleArchiveRun}
+    />
+  ) : (
+    runLeadingIcon
+  );
+
   const crownIcon = run.isCrowned ? (
     <Tooltip delayDuration={0}>
       <TooltipTrigger asChild>
@@ -1329,10 +1331,10 @@ function TaskRunTreeInner({
   const leadingContent = crownIcon ? (
     <div className="flex items-center gap-1">
       {crownIcon}
-      {runLeadingIcon}
+      {runMetaIcon}
     </div>
   ) : (
-    runLeadingIcon
+    runMetaIcon
   );
 
   // Generate VSCode URL if available
@@ -1342,7 +1344,7 @@ function TaskRunTreeInner({
     [hasActiveVSCode, run]
   );
 
-  // Collect running preview ports
+  // Collect running preview ports and custom previews
   const previewServices = useMemo(() => {
     if (!run.networking) return [];
     return run.networking.filter((service) => service.status === "running");
@@ -1372,9 +1374,6 @@ function TaskRunTreeInner({
   const hasOpenWithActions = openWithActions.length > 0;
   const hasPortActions = portActions.length > 0;
   const canCopyBranch = Boolean(copyRunBranch);
-  const shouldShowCopyDivider =
-    canCopyBranch && (hasOpenWithActions || hasPortActions);
-  const shouldShowOpenWithDivider = hasOpenWithActions && hasPortActions;
   const hasCollapsibleContent =
     hasChildren ||
     hasActiveVSCode ||
@@ -1383,6 +1382,16 @@ function TaskRunTreeInner({
     shouldRenderTerminalLink ||
     shouldRenderPullRequestLink ||
     shouldRenderPreviewLink;
+  const [isRunLinkFocusVisible, setIsRunLinkFocusVisible] = useState(false);
+  const handleRunLinkFocus = useCallback(
+    (event: FocusEvent<HTMLAnchorElement>) => {
+      setIsRunLinkFocusVisible(event.currentTarget.matches(":focus-visible"));
+    },
+    []
+  );
+  const handleRunLinkBlur = useCallback(() => {
+    setIsRunLinkFocusVisible(false);
+  }, []);
 
   return (
     <div className={clsx({ hidden: run.isArchived })}>
@@ -1399,7 +1408,10 @@ function TaskRunTreeInner({
               runId: run._id,
             })}
             className="group block"
+            data-focus-visible={isRunLinkFocusVisible ? "true" : undefined}
             activeOptions={{ exact: false }}
+            onFocus={handleRunLinkFocus}
+            onBlur={handleRunLinkBlur}
             onClick={(event) => {
               if (
                 event.defaultPrevented ||
@@ -1434,72 +1446,73 @@ function TaskRunTreeInner({
           <ContextMenu.Positioner className="outline-none z-[var(--z-context-menu)]">
             <ContextMenu.Popup className="origin-[var(--transform-origin)] rounded-md bg-white dark:bg-neutral-800 py-1 text-neutral-900 dark:text-neutral-100 shadow-lg shadow-gray-200 outline-1 outline-neutral-200 transition-[opacity] data-[ending-style]:opacity-0 dark:shadow-none dark:-outline-offset-1 dark:outline-neutral-700">
               {canCopyBranch ? (
-                <>
-                  <ContextMenu.Item
-                    className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
-                    onClick={copyRunBranch}
-                  >
-                    <GitBranch className="w-3.5 h-3.5" />
-                    Copy branch name
-                  </ContextMenu.Item>
-                  {shouldShowCopyDivider ? (
-                    <div className="my-1 h-px bg-neutral-200 dark:bg-neutral-700" />
-                  ) : null}
-                </>
+                <ContextMenu.Item
+                  className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
+                  onClick={copyRunBranch}
+                >
+                  <GitBranch className="w-3.5 h-3.5" />
+                  Copy branch name
+                </ContextMenu.Item>
               ) : null}
               {hasOpenWithActions ? (
-                <>
-                  <div className="px-3 py-1 text-[11px] font-medium text-neutral-500 dark:text-neutral-400 select-none">
-                    Open with
-                  </div>
-                  {openWithActions.map((action) => {
-                    const Icon = action.Icon;
-                    return (
-                      <ContextMenu.Item
-                        key={action.id}
-                        className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
-                        onClick={() => executeOpenAction(action)}
-                      >
-                        {Icon ? <Icon className="w-3.5 h-3.5" /> : null}
-                        {action.name}
-                      </ContextMenu.Item>
-                    );
-                  })}
-                  {shouldShowOpenWithDivider ? (
-                    <div className="my-1 h-px bg-neutral-200 dark:bg-neutral-700" />
-                  ) : null}
-                </>
+                <ContextMenu.SubmenuRoot>
+                  <ContextMenu.SubmenuTrigger className="flex items-center gap-2 cursor-default py-1.5 pr-4 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700">
+                    <ExternalLink className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
+                    <span>Open with</span>
+                    <ChevronRight className="w-3 h-3 ml-auto text-neutral-400 dark:text-neutral-500" />
+                  </ContextMenu.SubmenuTrigger>
+                  <ContextMenu.Positioner className="outline-none z-[var(--z-context-menu)]">
+                    <ContextMenu.Popup className="origin-[var(--transform-origin)] rounded-md bg-white dark:bg-neutral-800 py-1 text-neutral-900 dark:text-neutral-100 shadow-lg shadow-gray-200 outline-1 outline-neutral-200 data-[ending-style]:transition-[opacity] data-[ending-style]:duration-100 data-[ending-style]:ease-out data-[ending-style]:opacity-0 dark:shadow-none dark:-outline-offset-1 dark:outline-neutral-700 max-w-xs">
+                      <div className="max-h-64 overflow-y-auto">
+                        {openWithActions.map((action) => {
+                          const Icon = action.Icon;
+                          return (
+                            <ContextMenu.Item
+                              key={action.id}
+                              className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
+                              onClick={() => executeOpenAction(action)}
+                            >
+                              {Icon ? <Icon className="w-3.5 h-3.5" /> : null}
+                              {action.name}
+                            </ContextMenu.Item>
+                          );
+                        })}
+                      </div>
+                    </ContextMenu.Popup>
+                  </ContextMenu.Positioner>
+                </ContextMenu.SubmenuRoot>
               ) : null}
               {hasPortActions ? (
-                <>
-                  <div className="px-3 py-1 text-[11px] font-medium text-neutral-500 dark:text-neutral-400 select-none">
-                    Forwarded ports
-                  </div>
-                  {portActions.map((port) => (
-                    <ContextMenu.Item
-                      key={port.port}
-                      className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
-                      onClick={() => executePortAction(port)}
-                    >
-                      <Globe className="w-3 h-3" />
-                      Port {port.port}
-                    </ContextMenu.Item>
-                  ))}
-                </>
+                <ContextMenu.SubmenuRoot>
+                  <ContextMenu.SubmenuTrigger className="flex items-center gap-2 cursor-default py-1.5 pr-4 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700">
+                    <Globe className="w-3 h-3 text-neutral-600 dark:text-neutral-300" />
+                    <span>Forwarded ports</span>
+                    <ChevronRight className="w-3 h-3 ml-auto text-neutral-400 dark:text-neutral-500" />
+                  </ContextMenu.SubmenuTrigger>
+                  <ContextMenu.Positioner className="outline-none z-[var(--z-context-menu)]">
+                    <ContextMenu.Popup className="origin-[var(--transform-origin)] rounded-md bg-white dark:bg-neutral-800 py-1 text-neutral-900 dark:text-neutral-100 shadow-lg shadow-gray-200 outline-1 outline-neutral-200 data-[ending-style]:transition-[opacity] data-[ending-style]:duration-100 data-[ending-style]:ease-out data-[ending-style]:opacity-0 dark:shadow-none dark:-outline-offset-1 dark:outline-neutral-700 max-w-xs">
+                      <div className="max-h-64 overflow-y-auto">
+                        {portActions.map((port) => (
+                          <ContextMenu.Item
+                            key={port.port}
+                            className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
+                            onClick={() => executePortAction(port)}
+                          >
+                            <Globe className="w-3 h-3" />
+                            Port {port.port}
+                          </ContextMenu.Item>
+                        ))}
+                      </div>
+                    </ContextMenu.Popup>
+                  </ContextMenu.Positioner>
+                </ContextMenu.SubmenuRoot>
               ) : null}
-              <ContextMenu.Item
-                className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
-                onClick={() => setRunExpanded(run._id, !isExpanded)}
-              >
-                {isExpanded ? "Collapse details" : "Expand details"}
-              </ContextMenu.Item>
-              <div className="my-1 h-px bg-neutral-200 dark:bg-neutral-700" />
               <ContextMenu.Item
                 className="flex items-center gap-2 cursor-default py-1.5 pr-8 pl-3 text-[13px] leading-5 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-neutral-900 dark:data-[highlighted]:before:bg-neutral-700"
                 onClick={handleArchiveRun}
               >
                 <ArchiveIcon className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-300" />
-                <span>Archive run</span>
+                <span>Hide</span>
               </ContextMenu.Item>
             </ContextMenu.Popup>
           </ContextMenu.Positioner>
@@ -1518,6 +1531,7 @@ function TaskRunTreeInner({
         shouldRenderTerminalLink={shouldRenderTerminalLink}
         shouldRenderPullRequestLink={shouldRenderPullRequestLink}
         previewServices={previewServices}
+        customPreviews={run.customPreviews || []}
         environmentError={run.environmentError}
         onArchiveToggle={onArchiveToggle}
         showRunNumbers={showRunNumbers}
@@ -1572,6 +1586,46 @@ function TaskRunDetailLink({
   );
 }
 
+interface AddPreviewInputProps {
+  indentLevel: number;
+  onAdd: (url: string) => Promise<number>;
+  currentCount: number;
+  taskId: Id<"tasks">;
+  runId: Id<"taskRuns">;
+  teamSlugOrId: string;
+}
+
+function AddPreviewInput({ indentLevel, onAdd, currentCount, taskId, runId, teamSlugOrId }: AddPreviewInputProps) {
+  const navigate = useNavigate();
+
+  const handleClick = () => {
+    // Use next index as optimistic previewId
+    const previewId = String(currentCount);
+    
+    // Navigate immediately (optimistic)
+    void navigate({
+      to: "/$teamSlugOrId/task/$taskId/run/$runId/preview/$previewId",
+      params: { teamSlugOrId, taskId, runId, previewId },
+    });
+    
+    // Persist in background
+    void onAdd("about:blank").catch((error) => {
+      console.error("Failed to create preview", error);
+    });
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      className="w-full flex items-center gap-2 px-2 py-1 text-xs rounded-md hover:bg-neutral-200/45 dark:hover:bg-neutral-800/45 mt-px text-neutral-500 dark:text-neutral-400"
+      style={{ paddingLeft: `${24 + indentLevel * 8}px` }}
+    >
+      <Plus className="w-3 h-3 text-neutral-400" />
+      <span>Add preview URL</span>
+    </button>
+  );
+}
+
 interface TaskRunDetailsProps {
   run: AnnotatedTaskRun;
   level: number;
@@ -1584,6 +1638,10 @@ interface TaskRunDetailsProps {
   shouldRenderTerminalLink: boolean;
   shouldRenderPullRequestLink: boolean;
   previewServices: PreviewService[];
+  customPreviews: Array<{
+    url: string;
+    createdAt: number;
+  }>;
   environmentError?: {
     maintenanceError?: string;
     devError?: string;
@@ -1604,10 +1662,124 @@ function TaskRunDetails({
   shouldRenderTerminalLink,
   shouldRenderPullRequestLink,
   previewServices,
+  customPreviews,
   environmentError,
   onArchiveToggle,
   showRunNumbers,
 }: TaskRunDetailsProps) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  // Extract current previewId from URL if on preview route
+  const currentPreviewId = location.pathname.includes('/preview/') 
+    ? location.pathname.split('/preview/')[1]?.split('/')[0]
+    : undefined;
+  
+  const addCustomPreview = useMutation(api.taskRuns.addCustomPreview).withOptimisticUpdate(
+    (localStore, args) => {
+      const newPreview = {
+        url: args.url,
+        createdAt: Date.now(),
+      };
+      
+      // Update all queries that might have this task run
+      const taskRunsQuery = localStore.getQuery(api.taskRuns.getByTask, {
+        teamSlugOrId: args.teamSlugOrId,
+        taskId,
+      });
+      
+      if (taskRunsQuery) {
+        localStore.setQuery(
+          api.taskRuns.getByTask,
+          { teamSlugOrId: args.teamSlugOrId, taskId },
+          taskRunsQuery.map((r) =>
+            r._id === args.runId
+              ? { ...r, customPreviews: [...(r.customPreviews || []), newPreview] }
+              : r
+          )
+        );
+      }
+    }
+  );
+  
+  const removeCustomPreview = useMutation(api.taskRuns.removeCustomPreview).withOptimisticUpdate(
+    (localStore, args) => {
+      // Update all queries that might have this task run
+      const taskRunsQuery = localStore.getQuery(api.taskRuns.getByTask, {
+        teamSlugOrId: args.teamSlugOrId,
+        taskId,
+      });
+      
+      if (taskRunsQuery) {
+        localStore.setQuery(
+          api.taskRuns.getByTask,
+          { teamSlugOrId: args.teamSlugOrId, taskId },
+          taskRunsQuery.map((r) =>
+            r._id === args.runId
+              ? { ...r, customPreviews: (r.customPreviews || []).filter((_, i) => i !== args.index) }
+              : r
+          )
+        );
+      }
+    }
+  );
+
+  const handleAddPreview = useCallback(
+    async (url: string): Promise<number> => {
+      try {
+        const index = await addCustomPreview({
+          teamSlugOrId,
+          runId: run._id,
+          url,
+        });
+        return index;
+      } catch (error) {
+        console.error("Failed to add preview", error);
+        throw error;
+      }
+    },
+    [addCustomPreview, run._id, teamSlugOrId]
+  );
+
+  const handleRemovePreview = useCallback(
+    (index: number, currentPreviewId?: string) => {
+      void removeCustomPreview({
+        teamSlugOrId,
+        runId: run._id,
+        index,
+      }).catch((error) => {
+        console.error("Failed to remove preview", error);
+      });
+
+      // If we're currently viewing the tab being closed, navigate to another tab
+      if (currentPreviewId === String(index)) {
+        const remainingPreviews = customPreviews.filter((_, i) => i !== index);
+        
+        if (remainingPreviews.length > 0) {
+          // Navigate to previous tab (or next if it was the first)
+          const nextIndex = index > 0 ? index - 1 : 0;
+          void navigate({
+            to: "/$teamSlugOrId/task/$taskId/run/$runId/preview/$previewId",
+            params: { teamSlugOrId, taskId, runId: run._id, previewId: String(nextIndex) },
+          });
+        } else if (previewServices.length > 0) {
+          // Navigate to first port preview if available
+          void navigate({
+            to: "/$teamSlugOrId/task/$taskId/run/$runId/preview/$previewId",
+            params: { teamSlugOrId, taskId, runId: run._id, previewId: String(previewServices[0].port) },
+          });
+        } else {
+          // No tabs left, navigate to main taskrun page
+          void navigate({
+            to: "/$teamSlugOrId/task/$taskId/run/$runId",
+            params: { teamSlugOrId, taskId, runId: run._id, taskRunId: run._id },
+          });
+        }
+      }
+    },
+    [removeCustomPreview, run._id, teamSlugOrId, customPreviews, previewServices, navigate, taskId]
+  );
+
   if (!isExpanded) {
     return null;
   }
@@ -1628,9 +1800,7 @@ function TaskRunDetails({
         className="max-w-sm p-3 z-[var(--z-global-blocking)]"
       >
         <div className="space-y-1.5">
-          <p className="font-medium text-sm text-neutral-200">
-            Environment Issue
-          </p>
+          <p className="font-medium text-sm text-neutral-200">Scripts error</p>
           {environmentError?.maintenanceError && (
             <p className="text-xs text-neutral-400">
               Maintenance: {environmentError.maintenanceError}
@@ -1707,12 +1877,12 @@ function TaskRunDetails({
       {previewServices.map((service) => (
         <div key={service.port} className="relative group mt-px">
           <TaskRunDetailLink
-            to="/$teamSlugOrId/task/$taskId/run/$runId/preview/$port"
+            to="/$teamSlugOrId/task/$taskId/run/$runId/preview/$previewId"
             params={{
               teamSlugOrId,
               taskId,
               runId: run._id,
-              port: `${service.port}`,
+              previewId: `${service.port}`,
             }}
             icon={<ExternalLink className="w-3 h-3 mr-2 text-neutral-400" />}
             label={`Preview (port ${service.port})`}
@@ -1761,6 +1931,80 @@ function TaskRunDetails({
           </Dropdown.Root>
         </div>
       ))}
+
+      {customPreviews.map((preview, index) => (
+        <div key={index} className="relative group mt-px">
+          <TaskRunDetailLink
+            to="/$teamSlugOrId/task/$taskId/run/$runId/preview/$previewId"
+            params={{
+              teamSlugOrId,
+              taskId,
+              runId: run._id,
+              previewId: String(index),
+            }}
+            icon={<ExternalLink className="w-3 h-3 mr-2 text-neutral-400" />}
+            label={preview.url}
+            indentLevel={indentLevel}
+            className="pr-10"
+            onClick={(event) => {
+              if (event.metaKey || event.ctrlKey) {
+                event.preventDefault();
+                window.open(preview.url, "_blank", "noopener,noreferrer");
+              }
+            }}
+          />
+
+          <Dropdown.Root>
+            <Dropdown.Trigger
+              onClick={(event) => event.stopPropagation()}
+              className={clsx(
+                "absolute right-2 top-1/2 -translate-y-1/2",
+                "p-1 rounded flex items-center gap-1",
+                "bg-neutral-100/80 dark:bg-neutral-700/80",
+                "hover:bg-neutral-200/80 dark:hover:bg-neutral-600/80",
+                "text-neutral-600 dark:text-neutral-400"
+              )}
+            >
+              <EllipsisVertical className="w-2.5 h-2.5" />
+            </Dropdown.Trigger>
+            <Dropdown.Portal>
+              <Dropdown.Positioner
+                sideOffset={8}
+                side={isElectron ? "left" : "bottom"}
+              >
+                <Dropdown.Popup>
+                  <Dropdown.Arrow />
+                  <Dropdown.Item
+                    onClick={() => {
+                      window.open(preview.url, "_blank", "noopener,noreferrer");
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Open in new tab
+                  </Dropdown.Item>
+                  <Dropdown.Item
+                    onClick={() => handleRemovePreview(index, currentPreviewId)}
+                    className="flex items-center gap-2 text-red-600 dark:text-red-400"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Remove preview
+                  </Dropdown.Item>
+                </Dropdown.Popup>
+              </Dropdown.Positioner>
+            </Dropdown.Portal>
+          </Dropdown.Root>
+        </div>
+      ))}
+
+      <AddPreviewInput 
+        indentLevel={indentLevel} 
+        onAdd={handleAddPreview}
+        currentCount={customPreviews.length}
+        taskId={taskId}
+        runId={run._id}
+        teamSlugOrId={teamSlugOrId}
+      />
 
       {hasChildren ? (
         <div className="flex flex-col">

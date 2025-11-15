@@ -25,7 +25,9 @@ import type * as github_app from "../github_app.js";
 import type * as github_check_runs from "../github_check_runs.js";
 import type * as github_commit_statuses from "../github_commit_statuses.js";
 import type * as github_deployments from "../github_deployments.js";
+import type * as github_http from "../github_http.js";
 import type * as github_pr_comments from "../github_pr_comments.js";
+import type * as github_pr_merge_handler from "../github_pr_merge_handler.js";
 import type * as github_prs from "../github_prs.js";
 import type * as github_setup from "../github_setup.js";
 import type * as github_webhook from "../github_webhook.js";
@@ -47,6 +49,7 @@ import type * as teams from "../teams.js";
 import type * as users_utils_getWorkerAuth from "../users/utils/getWorkerAuth.js";
 import type * as users_utils_index from "../users/utils/index.js";
 import type * as users from "../users.js";
+import type * as workspaceConfigs from "../workspaceConfigs.js";
 import type * as workspaceSettings from "../workspaceSettings.js";
 
 import type {
@@ -81,7 +84,9 @@ declare const fullApi: ApiFromModules<{
   github_check_runs: typeof github_check_runs;
   github_commit_statuses: typeof github_commit_statuses;
   github_deployments: typeof github_deployments;
+  github_http: typeof github_http;
   github_pr_comments: typeof github_pr_comments;
+  github_pr_merge_handler: typeof github_pr_merge_handler;
   github_prs: typeof github_prs;
   github_setup: typeof github_setup;
   github_webhook: typeof github_webhook;
@@ -103,6 +108,7 @@ declare const fullApi: ApiFromModules<{
   "users/utils/getWorkerAuth": typeof users_utils_getWorkerAuth;
   "users/utils/index": typeof users_utils_index;
   users: typeof users;
+  workspaceConfigs: typeof workspaceConfigs;
   workspaceSettings: typeof workspaceSettings;
 }>;
 declare const fullApiWithMounts: typeof fullApi;

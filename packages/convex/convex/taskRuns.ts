@@ -928,6 +928,94 @@ export const fail = authMutation({
   },
 });
 
+export const addCustomPreview = authMutation({
+  args: {
+    teamSlugOrId: v.string(),
+    runId: v.id("taskRuns"),
+    url: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = ctx.identity.subject;
+    const teamId = await resolveTeamIdLoose(ctx, args.teamSlugOrId);
+    const doc = await ctx.db.get(args.runId);
+    if (!doc || doc.teamId !== teamId || doc.userId !== userId) {
+      throw new Error("Task run not found or unauthorized");
+    }
+
+    const newPreview = {
+      url: args.url,
+      createdAt: Date.now(),
+    };
+
+    const customPreviews = doc.customPreviews || [];
+    const index = customPreviews.length;
+    
+    await ctx.db.patch(args.runId, {
+      customPreviews: [...customPreviews, newPreview],
+      updatedAt: Date.now(),
+    });
+
+    return index;
+  },
+});
+
+export const removeCustomPreview = authMutation({
+  args: {
+    teamSlugOrId: v.string(),
+    runId: v.id("taskRuns"),
+    index: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const userId = ctx.identity.subject;
+    const teamId = await resolveTeamIdLoose(ctx, args.teamSlugOrId);
+    const doc = await ctx.db.get(args.runId);
+    if (!doc || doc.teamId !== teamId || doc.userId !== userId) {
+      throw new Error("Task run not found or unauthorized");
+    }
+
+    const customPreviews = doc.customPreviews || [];
+    const updated = customPreviews.filter((_, i) => i !== args.index);
+
+    await ctx.db.patch(args.runId, {
+      customPreviews: updated,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const updateCustomPreviewUrl = authMutation({
+  args: {
+    teamSlugOrId: v.string(),
+    runId: v.id("taskRuns"),
+    index: v.number(),
+    url: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = ctx.identity.subject;
+    const teamId = await resolveTeamIdLoose(ctx, args.teamSlugOrId);
+    const doc = await ctx.db.get(args.runId);
+    if (!doc || doc.teamId !== teamId || doc.userId !== userId) {
+      throw new Error("Task run not found or unauthorized");
+    }
+
+    const customPreviews = doc.customPreviews || [];
+    if (args.index < 0 || args.index >= customPreviews.length) {
+      throw new Error("Invalid preview index");
+    }
+
+    const updated = customPreviews.map((preview, i) =>
+      i === args.index
+        ? { ...preview, url: args.url }
+        : preview
+    );
+
+    await ctx.db.patch(args.runId, {
+      customPreviews: updated,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const listByTaskInternal = internalQuery({
   args: { taskId: v.id("tasks") },
   handler: async (ctx, args) => {
@@ -1271,6 +1359,37 @@ export const updateNetworking = authMutation({
   },
 });
 
+async function performUpdateEnvironmentError(
+  ctx: MutationCtx,
+  args: {
+    id: Id<"taskRuns">;
+    teamId: string;
+    userId: string;
+    maintenanceError?: string;
+    devError?: string;
+  },
+) {
+  const run = await ctx.db.get(args.id);
+
+  if (!run) {
+    throw new Error("Task run not found");
+  }
+
+  if (run.teamId !== args.teamId || run.userId !== args.userId) {
+    throw new Error("Task run mismatch for provided credentials");
+  }
+
+  const environmentError = normalizeEnvironmentErrorPayload(
+    args.maintenanceError,
+    args.devError,
+  );
+
+  await ctx.db.patch(args.id, {
+    environmentError,
+    updatedAt: Date.now(),
+  });
+}
+
 export const updateEnvironmentErrorFromWorker = internalMutation({
   args: {
     id: v.id("taskRuns"),
@@ -1280,24 +1399,27 @@ export const updateEnvironmentErrorFromWorker = internalMutation({
     devError: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const run = await ctx.db.get(args.id);
+    await performUpdateEnvironmentError(ctx, args);
+  },
+});
 
-    if (!run) {
-      throw new Error("Task run not found");
-    }
+export const updateEnvironmentError = authMutation({
+  args: {
+    teamSlugOrId: v.string(),
+    id: v.id("taskRuns"),
+    maintenanceError: v.optional(v.string()),
+    devError: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = ctx.identity.subject;
+    const teamId = await resolveTeamIdLoose(ctx, args.teamSlugOrId);
 
-    if (run.teamId !== args.teamId || run.userId !== args.userId) {
-      throw new Error("Task run mismatch for provided credentials");
-    }
-
-    const environmentError = normalizeEnvironmentErrorPayload(
-      args.maintenanceError,
-      args.devError,
-    );
-
-    await ctx.db.patch(args.id, {
-      environmentError,
-      updatedAt: Date.now(),
+    await performUpdateEnvironmentError(ctx, {
+      id: args.id,
+      teamId,
+      userId,
+      maintenanceError: args.maintenanceError,
+      devError: args.devError,
     });
   },
 });

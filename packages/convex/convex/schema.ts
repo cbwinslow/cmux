@@ -95,6 +95,7 @@ const convexSchema = defineSchema({
     text: v.string(),
     isCompleted: v.boolean(),
     isArchived: v.optional(v.boolean()),
+    pinned: v.optional(v.boolean()),
     isLocalWorkspace: v.optional(v.boolean()),
     isCloudWorkspace: v.optional(v.boolean()),
     description: v.optional(v.string()),
@@ -160,7 +161,8 @@ const convexSchema = defineSchema({
   })
     .index("by_created", ["createdAt"])
     .index("by_user", ["userId", "createdAt"])
-    .index("by_team_user", ["teamId", "userId"]),
+    .index("by_team_user", ["teamId", "userId"])
+    .index("by_pinned", ["pinned", "teamId", "userId"]),
 
   taskRuns: defineTable({
     taskId: v.id("tasks"),
@@ -278,6 +280,14 @@ const convexSchema = defineSchema({
           ),
           port: v.number(),
           url: v.string(),
+        })
+      )
+    ),
+    customPreviews: v.optional(
+      v.array(
+        v.object({
+          url: v.string(),
+          createdAt: v.number(),
         })
       )
     ),
@@ -470,13 +480,16 @@ const convexSchema = defineSchema({
     connectionId: v.optional(v.id("providerConnections")),
     lastSyncedAt: v.optional(v.number()),
     lastPushedAt: v.optional(v.number()),
+    // Manual repos (added via custom URL input)
+    manual: v.optional(v.boolean()),
   })
     .index("by_org", ["org"])
     .index("by_gitRemote", ["gitRemote"])
     .index("by_team_user", ["teamId", "userId"]) // legacy user scoping
     .index("by_team", ["teamId"]) // team-scoped listing
     .index("by_providerRepoId", ["teamId", "providerRepoId"]) // provider id lookup
-    .index("by_connection", ["connectionId"]),
+    .index("by_connection", ["connectionId"])
+    .index("by_team_fullName", ["teamId", "fullName"]),
   branches: defineTable({
     repo: v.string(), // legacy string repo name (fullName)
     repoId: v.optional(v.id("repos")), // canonical link to repos table
@@ -521,6 +534,15 @@ const convexSchema = defineSchema({
     userId: v.string(),
     teamId: v.string(),
   }).index("by_team_user", ["teamId", "userId"]),
+  workspaceConfigs: defineTable({
+    projectFullName: v.string(),
+    maintenanceScript: v.optional(v.string()),
+    dataVaultKey: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    userId: v.string(),
+    teamId: v.string(),
+  }).index("by_team_user_repo", ["teamId", "userId", "projectFullName"]),
   crownEvaluations: defineTable({
     taskId: v.id("tasks"),
     evaluatedAt: v.number(),
